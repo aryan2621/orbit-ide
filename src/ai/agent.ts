@@ -173,14 +173,28 @@ async function complete(messages: ApiMessage[], opts: { tools?: unknown[]; schem
 }
 
 /** Some models write calls as text (`<tool_call>{…}</tool_call>`) when the server can't parse them. */
+/** Tool calls a model wrote as text: inside <tool_call> tags, or (Qwen2.5 Coder often does this) as a
+ * JSON code block / bare object naming one of our tools. */
 function callsFromText(text: string): AiToolCall[] {
   const calls: AiToolCall[] = [];
-  for (const m of text.matchAll(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g)) {
+  const known = new Set(toolNames());
+  const take = (raw: string, requireKnown: boolean) => {
     try {
-      const v = JSON.parse(m[1]);
-      if (typeof v.name === "string") calls.push({ id: `call_${calls.length}`, name: v.name, arguments: JSON.stringify(v.arguments ?? {}) });
+      const v = JSON.parse(raw);
+      for (const c of Array.isArray(v) ? v : [v]) {
+        const name = c?.name ?? c?.tool ?? c?.function?.name;
+        const args = c?.arguments ?? c?.parameters ?? c?.function?.arguments ?? {};
+        if (typeof name !== "string" || (requireKnown && !known.has(name))) continue;
+        calls.push({ id: `call_${calls.length}`, name, arguments: typeof args === "string" ? args : JSON.stringify(args) });
+      }
     } catch {}
-  }
+  };
+  for (const m of text.matchAll(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g)) take(m[1], false);
+  if (calls.length) return calls;
+  for (const m of text.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)) take(m[1].trim(), true);
+  if (calls.length) return calls;
+  const bare = text.trim();
+  if (bare.startsWith("{") && bare.endsWith("}")) take(bare, true);
   return calls;
 }
 
@@ -279,8 +293,11 @@ export async function send(text: string, options: { tools?: boolean } = {}) {
       push({ kind: "assistant", text: "" });
       const reply = await complete(messages, { tools, signal });
       if (signal.aborted) break;
-      let calls = reply.calls.length ? reply.calls : callsFromText(reply.content);
+      const textCalls = reply.calls.length ? [] : callsFromText(reply.content);
+      let calls = reply.calls.length ? reply.calls : textCalls;
       let content = reply.content.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").trim();
+      // A call written as a JSON block comes with "please run this" prose meant for a human: drop it.
+      if (textCalls.length && !reply.content.includes("<tool_call>")) content = "";
       if (calls.length === 0 && reply.content.includes("<tool_call>")) {
         const fallback = await singleAction(messages, signal);
         if (typeof fallback === "string") content = fallback;
