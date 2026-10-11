@@ -1,0 +1,24 @@
+Orbit
+Copyright (c) 2026 Rishabh Verma. All rights reserved.
+
+This software and its source code are proprietary. No part of the source code may be copied,
+modified, distributed, sublicensed or used to create derivative works without the prior written
+permission of the copyright holder.
+
+Permission is granted, free of charge, to download, install and use the official Orbit application
+binaries published by the copyright holder, for any personal or commercial purpose, subject to these
+conditions:
+
+  1. You may not redistribute, sell, rent or sublicense the binaries, or modify, decompile,
+     disassemble or reverse engineer them, except as permitted by applicable law.
+  2. You may not remove or alter any copyright, license or attribution notices.
+
+Orbit includes third-party software under its own licenses; see THIRD_PARTY_NOTICES. AI models that
+Orbit downloads at your request are provided by their authors under the licenses shown before
+download, and your use of them is governed by those licenses.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.

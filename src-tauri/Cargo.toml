@@ -1,8 +1,8 @@
 [package]
 name = "orbit-ide"
-version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+version = "1.0.0"
+description = "Orbit: an IDE for building iOS and Android apps"
+authors = ["Rishabh Verma"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -24,10 +24,15 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 portable-pty = "0.9.0"
 tauri-plugin-dialog = "2.8.2"
-tokio = { version = "1.53.2", features = ["process", "io-util", "rt", "macros", "sync", "time"] }
+tokio = { version = "1.53.2", features = ["process", "io-util", "rt", "macros", "sync", "time", "net"] }
 ignore = "0.4.33"
 regex = "1.13.1"
 trash = "5.2.9"
+notify-debouncer-mini = "0.7.0"
+libc = "0.2"
+reqwest = { version = "0.13", features = ["json"] }
+sha2 = "0.11"
+tauri-plugin-updater = "2.13.3"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

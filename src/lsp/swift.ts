@@ -5,6 +5,17 @@ import { LspClient } from "./client";
 import { fsApi } from "../lib/ipc";
 import { useWorkspace } from "../state/workspace";
 import { openAt } from "../editor/navigation";
+import {
+  applyTextEdits,
+  CLIENT_CAPABILITIES,
+  didChangeParams,
+  ensureModel,
+  isFileModel,
+  registerServer,
+  registerSharedProviders,
+  setServerState,
+  wireClient,
+} from "./servers";
 
 const LANG = "swift";
 
@@ -26,39 +37,33 @@ async function ensureClient(): Promise<LspClient | null> {
   starting = (async () => {
     await stopClient();
     try {
+      setServerState(LANG, "starting");
       const c = await LspClient.start(root);
       const rootUri = monaco.Uri.file(root).toString();
-      await c.request("initialize", {
+      const init = await c.request("initialize", {
         processId: null,
         rootUri,
         workspaceFolders: [{ uri: rootUri, name: root.split("/").pop() }],
-        capabilities: {
-          textDocument: {
-            synchronization: { didSave: false, dynamicRegistration: false },
-            completion: {
-              completionItem: { snippetSupport: true, documentationFormat: ["markdown", "plaintext"] },
-            },
-            hover: { contentFormat: ["markdown", "plaintext"] },
-            definition: { linkSupport: true },
-            formatting: {},
-            rename: { prepareSupport: false },
-            publishDiagnostics: { relatedInformation: false },
-          },
-          workspace: { workspaceEdit: { documentChanges: true }, configuration: true, workspaceFolders: true },
-          window: { workDoneProgress: false },
-        },
+        capabilities: CLIENT_CAPABILITIES,
       });
+      c.capabilities = init?.capabilities ?? {};
+      wireClient(c, LANG, "sourcekit-lsp");
       c.notify("initialized", {});
       c.onNotification("textDocument/publishDiagnostics", publishDiagnostics);
       c.onExit = () => {
-        if (client === c) client = null;
+        if (client !== c) return;
+        client = null;
+        setServerState(LANG, "crashed");
       };
       client = c;
       clientRoot = root;
-      monaco.editor.getModels().filter((m) => m.getLanguageId() === LANG).forEach(didOpen);
+      setServerState(LANG, "ready");
+      monaco.editor.getModels().filter((m) => m.getLanguageId() === LANG && isFileModel(m)).forEach(didOpen);
       return c;
     } catch (e) {
       console.error("sourcekit-lsp failed to start", e);
+      setServerState(LANG, "crashed");
+      useWorkspace.setState({ error: `sourcekit-lsp couldn't start (${e}). Swift completion and errors in the editor are off; check Setup.` });
       return null;
     } finally {
       starting = null;
@@ -71,6 +76,7 @@ async function stopClient() {
   const c = client;
   client = null;
   clientRoot = null;
+  setServerState(LANG, null);
   monaco.editor.getModels().forEach((m) => monaco.editor.setModelMarkers(m, "sourcekit", []));
   await c?.stop().catch(() => {});
 }
@@ -97,11 +103,8 @@ monaco.editor.onDidCreateModel((model) => {
   if (client) didOpen(model);
   else ensureClient(); // opens every Swift model once ready
 
-  const change = model.onDidChangeContent(() => {
-    client?.notify("textDocument/didChange", {
-      textDocument: { uri: toUri(model), version: model.getVersionId() },
-      contentChanges: [{ text: model.getValue() }],
-    });
+  const change = model.onDidChangeContent((e) => {
+    if (client) client.notify("textDocument/didChange", didChangeParams(client, model, e));
   });
   model.onWillDispose(() => {
     change.dispose();
@@ -168,28 +171,6 @@ function markdown(contents: any): monaco.IMarkdownString[] {
         ? { value: c.kind === "markdown" ? c.value : "```\n" + c.value + "\n```" }
         : { value: "```" + c.language + "\n" + c.value + "\n```" };
   return Array.isArray(contents) ? contents.map(one) : [one(contents)];
-}
-
-/** Applies LSP text edits to a string (edits are non-overlapping; apply back to front). */
-function applyEdits(text: string, edits: LspTextEdit[]): string {
-  const lineStarts = [0];
-  for (let i = 0; i < text.length; i++) if (text[i] === "\n") lineStarts.push(i + 1);
-  const offset = (p: LspPosition) => Math.min((lineStarts[p.line] ?? text.length) + p.character, text.length);
-  const sorted = [...edits].sort((a, b) => offset(b.range.start) - offset(a.range.start));
-  for (const e of sorted) text = text.slice(0, offset(e.range.start)) + e.newText + text.slice(offset(e.range.end));
-  return text;
-}
-
-/** Makes sure a model exists for a file the editor hasn't opened, so Monaco can peek into it. */
-async function ensureModel(uri: string) {
-  const resource = monaco.Uri.parse(uri);
-  if (monaco.editor.getModel(resource)) return;
-  try {
-    const text = await fsApi.readFile(resource.fsPath);
-    if (!monaco.editor.getModel(resource)) monaco.editor.createModel(text, undefined, resource);
-  } catch {
-    // Unreadable target (e.g. SDK interface without a file); Monaco will skip it.
-  }
 }
 
 // ---------------------------------------------------------------- providers
@@ -289,7 +270,7 @@ monaco.languages.registerRenameProvider(LANG, {
         }
       } else {
         const path = pathOf(uri);
-        await fsApi.writeFile(path, applyEdits(await fsApi.readFile(path), edits));
+        await fsApi.writeFile(path, applyTextEdits(await fsApi.readFile(path), edits));
         monaco.editor.getModel(resource)?.dispose(); // stale peek model
       }
     }
@@ -310,3 +291,6 @@ export async function restartSwiftServer() {
   await stopClient();
   if (monaco.editor.getModels().some((m) => m.getLanguageId() === LANG)) await ensureClient();
 }
+
+registerSharedProviders(LANG);
+registerServer({ language: LANG, label: "Swift", current: () => client, ensure: ensureClient, restart: restartSwiftServer });

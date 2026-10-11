@@ -5,9 +5,10 @@ import { JobExit, projectApi } from "../lib/ipc";
 import { useUi } from "../state/ui";
 import { useWorkspace } from "../state/workspace";
 import { openAt } from "../editor/navigation";
+import { confirmDiscardAll } from "../editor/unsaved";
 import { IconClose } from "../components/Icons";
 
-const DEPLOYMENT_TARGETS = ["16.0", "17.0", "18.0"];
+const DEPLOYMENT_TARGETS = ["17.0", "18.0", "26.0"];
 const LOCATION_KEY = "orbit.newProject.location";
 const PREFIX_KEY = "orbit.newProject.bundlePrefix";
 
@@ -25,7 +26,7 @@ export default function NewProject() {
   const [name, setName] = useState("MyApp");
   const [prefix, setPrefix] = useState(() => recall(PREFIX_KEY, "com.example"));
   const [location, setLocation] = useState(() => recall(LOCATION_KEY, ""));
-  const [target, setTarget] = useState("17.0");
+  const [target, setTarget] = useState("18.0");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
@@ -39,6 +40,7 @@ export default function NewProject() {
   };
 
   const create = async () => {
+    if (!(await confirmDiscardAll("Creating a project opens it and closes all files."))) return;
     setBusy(true);
     setError(null);
     setLog([]);
@@ -78,7 +80,12 @@ export default function NewProject() {
         <header className="setup-header">
           <div>
             <h1 id="new-project-title">New iOS App</h1>
-            <p className="muted">A SwiftUI app for iPhone and iPad, generated with XcodeGen.</p>
+            <p className="muted">
+              A SwiftUI app for iPhone and iPad, generated with XcodeGen.{" "}
+              <button className="link" onClick={() => setShowNewProject("android")} disabled={busy}>
+                Make an Android app instead
+              </button>
+            </p>
           </div>
           <button className="icon-btn" title="Close" onClick={() => setShowNewProject(false)} disabled={busy}>
             <IconClose />

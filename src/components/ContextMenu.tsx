@@ -14,9 +14,10 @@ type Menu = { x: number; y: number; items: (MenuItem | null)[] } | null;
 
 const useMenu = create<{ menu: Menu }>(() => ({ menu: null }));
 
-export function openContextMenu(e: { clientX: number; clientY: number; preventDefault: () => void }, items: (MenuItem | null)[]) {
+/** `false` entries are skipped (for `condition && item`). */
+export function openContextMenu(e: { clientX: number; clientY: number; preventDefault: () => void }, items: (MenuItem | null | false)[]) {
   e.preventDefault();
-  useMenu.setState({ menu: { x: e.clientX, y: e.clientY, items } });
+  useMenu.setState({ menu: { x: e.clientX, y: e.clientY, items: items.filter((i): i is MenuItem | null => i !== false) } });
 }
 
 /** Mount once at the app root. */

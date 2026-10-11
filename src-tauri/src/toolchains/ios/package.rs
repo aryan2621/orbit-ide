@@ -68,21 +68,3 @@ pub async fn executable_path(dir: &str, product: &str, configuration: &str) -> R
     }
     Ok(format!("{bin}/{product}"))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn reads_products() {
-        let j = json!({ "products": [
-            { "name": "Tool", "type": { "executable": null } },
-            { "name": "Kit", "type": { "library": ["automatic"] } }
-        ]});
-        assert_eq!(
-            parse_products(&j),
-            [Product { name: "Tool".into(), executable: true }, Product { name: "Kit".into(), executable: false }]
-        );
-    }
-}

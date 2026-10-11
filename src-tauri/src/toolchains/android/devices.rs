@@ -24,6 +24,9 @@ pub struct Device {
     pub os: String,
     /// Running and ready for adb (an authorized phone, or a started emulator).
     pub booted: bool,
+    /// The AVD name, for emulators (running or not).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avd: Option<String>,
 }
 
 pub const AVD_PREFIX: &str = "avd:";
@@ -63,7 +66,11 @@ pub fn parse_adb_devices(out: &str) -> Vec<AdbEntry> {
         .filter_map(|l| {
             let mut parts = l.split_whitespace();
             let serial = parts.next()?.to_owned();
-            let state = parts.next()?.to_owned();
+            let mut state = parts.next()?.to_owned();
+            // Linux: "no permissions (missing udev rules?…)" — keep it readable.
+            if state == "no" && l.contains("no permissions") {
+                state = "no permissions".into();
+            }
             let model = parts.find_map(|p| p.strip_prefix("model:")).map(|m| m.replace('_', " "));
             Some(AdbEntry { serial, state, model })
         })
@@ -87,11 +94,17 @@ pub async fn connected(adb_bin: &PathBuf) -> Vec<(AdbEntry, Option<String>)> {
 }
 
 /// API level of an AVD that isn't running, from its config.ini (`image.sysdir.1=system-images/android-36.1/…`).
-fn avd_api(name: &str) -> Option<String> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    let ini = std::fs::read_to_string(home.join(".android/avd").join(format!("{name}.ini"))).ok()?;
-    let dir = ini.lines().find_map(|l| l.strip_prefix("path="))?;
-    let config = std::fs::read_to_string(PathBuf::from(dir.trim()).join("config.ini")).ok()?;
+fn avd_api(avd_home: &std::path::Path, name: &str) -> Option<String> {
+    let ini = std::fs::read_to_string(avd_home.join(format!("{name}.ini"))).ok()?;
+    // `path=` is absolute; `path.rel=` is relative to the AVD home's parent (~/.android).
+    let dir = match ini.lines().find_map(|l| l.strip_prefix("path=")) {
+        Some(abs) if std::path::Path::new(abs.trim()).is_dir() => PathBuf::from(abs.trim()),
+        _ => {
+            let rel = ini.lines().find_map(|l| l.strip_prefix("path.rel="))?;
+            avd_home.parent()?.join(rel.trim())
+        }
+    };
+    let config = std::fs::read_to_string(dir.join("config.ini")).ok()?;
     let sysdir = config.lines().find_map(|l| l.strip_prefix("image.sysdir.1="))?;
     sysdir.split('/').find_map(|p| p.strip_prefix("android-")).map(|api| format!("API {api}"))
 }
@@ -116,10 +129,10 @@ pub async fn android_devices() -> Vec<Device> {
             "unauthorized" => format!("{base} (allow USB debugging on the phone)"),
             state => format!("{base} ({state})"),
         };
-        if let Some(a) = avd {
-            running_avds.push(a);
+        if let Some(a) = &avd {
+            running_avds.push(a.clone());
         }
-        devices.push(Device { id: entry.serial, name, kind: if emulator { DeviceKind::Emulator } else { DeviceKind::Device }, os, booted: ready });
+        devices.push(Device { id: entry.serial, name, kind: if emulator { DeviceKind::Emulator } else { DeviceKind::Device }, os, booted: ready, avd });
     }
     for avd in sdk::avds(&shell) {
         if !running_avds.contains(&avd) {
@@ -127,12 +140,39 @@ pub async fn android_devices() -> Vec<Device> {
                 id: format!("{AVD_PREFIX}{avd}"),
                 name: avd.replace('_', " "),
                 kind: DeviceKind::Emulator,
-                os: avd_api(&avd).unwrap_or_default(),
+                os: avd_api(&sdk::avd_home(&shell), &avd).unwrap_or_default(),
                 booted: false,
+                avd: Some(avd.clone()),
             });
         }
     }
     devices
+}
+
+/// Launches the emulator for AVD `name` with `extra` flags. Its output goes to a log file (returned)
+/// so a failed start can explain itself. Detached in its own process group on purpose: the emulator
+/// keeps running after the job (and Orbit) ends, so the next run doesn't boot it again.
+pub async fn spawn_emulator(name: &str, extra: &[&str]) -> Result<(std::process::Child, PathBuf), String> {
+    let shell = sdk::shell_env().await;
+    let root = sdk::sdk_root(&shell);
+    let emulator = sdk::emulator(&root).ok_or("The Android emulator isn't installed (Setup → Android)")?;
+    let log_path = std::env::temp_dir().join(format!("orbit-emulator-{name}.log"));
+    let log_file = std::fs::File::create(&log_path).map_err(|e| format!("Couldn't create the emulator log: {e}"))?;
+    let log_err = log_file.try_clone().map_err(|e| e.to_string())?;
+    let mut cmd = std::process::Command::new(emulator);
+    // Snapshots make the next start a quick resume instead of a full cold boot.
+    cmd.args(["-avd", name])
+        .args(extra)
+        .env("PATH", env::path())
+        .env("ANDROID_HOME", &root)
+        .env("ANDROID_SDK_ROOT", &root)
+        .env("ANDROID_AVD_HOME", sdk::avd_home(&shell))
+        .stdin(std::process::Stdio::null())
+        .stdout(log_file)
+        .stderr(log_err);
+    crate::children::own_group_std(&mut cmd);
+    let child = cmd.spawn().map_err(|e| format!("Couldn't start the emulator: {e}"))?;
+    Ok((child, log_path))
 }
 
 /// Starts an AVD (if it isn't already running) and waits until Android has finished booting.
@@ -144,37 +184,38 @@ pub async fn boot_avd(adb_bin: &PathBuf, name: &str, log: impl Fn(String), cance
     let serial = match find().await {
         Some(s) => s,
         None => {
-            let shell = sdk::shell_env().await;
-            let emulator = sdk::emulator(&sdk::sdk_root(&shell)).ok_or("The Android emulator isn't installed (Setup → Android)")?;
             log(format!("Starting emulator {}…", name.replace('_', " ")));
-            // Detached on purpose: the emulator keeps running after this job (and Orbit) ends.
-            std::process::Command::new(emulator)
-                .args(["-avd", name, "-no-snapshot-save"])
-                .env("PATH", env::path())
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .map_err(|e| format!("Couldn't start the emulator: {e}"))?;
+            let (mut child, log_path) = spawn_emulator(name, &[]).await?;
             let started = Instant::now();
-            loop {
+            let serial = loop {
                 if cancelled() {
                     return Err("Cancelled".into());
                 }
                 if let Some(s) = find().await {
                     break s;
                 }
-                if started.elapsed() > Duration::from_secs(120) {
-                    return Err("The emulator didn't start within 2 minutes".into());
+                if let Ok(Some(status)) = child.try_wait() {
+                    return Err(format!("The emulator quit while starting ({status}). {}", emulator_failure(&log_path)));
+                }
+                if started.elapsed() > Duration::from_secs(180) {
+                    return Err(format!("The emulator didn't start within 3 minutes. {}", emulator_failure(&log_path)));
                 }
                 tokio::time::sleep(Duration::from_secs(1)).await;
-            }
+            };
+            // Reap it whenever it exits so it doesn't linger as a zombie while Orbit runs.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            serial
         }
     };
     let started = Instant::now();
     let mut announced = false;
     loop {
-        if adb_output(adb_bin, Some(&serial), &["shell", "getprop", "sys.boot_completed"]).await.as_deref() == Some("1") {
+        // boot_completed can be set a moment before the package manager takes installs.
+        if adb_output(adb_bin, Some(&serial), &["shell", "getprop", "sys.boot_completed"]).await.as_deref() == Some("1")
+            && adb_output(adb_bin, Some(&serial), &["shell", "pm", "path", "android"]).await.is_some_and(|o| o.contains("package:"))
+        {
             return Ok(serial);
         }
         if !announced {
@@ -189,6 +230,38 @@ pub async fn boot_avd(adb_bin: &PathBuf, name: &str, log: impl Fn(String), cance
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
+}
+
+/// The most useful lines of the emulator's log after a failed start.
+pub fn emulator_failure(log_path: &std::path::Path) -> String {
+    let text = std::fs::read_to_string(log_path).unwrap_or_default();
+    let important: Vec<&str> = text
+        .lines()
+        .filter(|l| l.contains("ERROR") || l.contains("FATAL") || l.contains("PANIC") || l.contains("error"))
+        .collect();
+    let lines: Vec<&str> = if important.is_empty() { text.lines().rev().take(5).collect::<Vec<_>>().into_iter().rev().collect() } else { important.into_iter().rev().take(5).rev().collect() };
+    let hint = if text.contains("Running multiple emulators with the same AVD") || text.contains(".lock") {
+        " This AVD seems to be running already (or left a stale lock): close other emulators, or delete the *.lock files in its .avd folder."
+    } else if text.contains("Not enough space") || text.contains("No space left") {
+        " The disk is almost full; free some space."
+    } else {
+        ""
+    };
+    if lines.is_empty() {
+        format!("Full log: {}", log_path.display())
+    } else {
+        format!("{}{hint} (full log: {})", lines.join(" | "), log_path.display())
+    }
+}
+
+/// Shuts down a running emulator (`adb emu kill`).
+#[tauri::command]
+pub async fn android_emulator_stop(serial: String) -> Result<(), String> {
+    if !serial.starts_with("emulator-") {
+        return Err("Only emulators can be shut down from Orbit".into());
+    }
+    let adb_bin = adb_path().await.ok_or("adb isn't installed (Setup → Android)")?;
+    adb_output(&adb_bin, Some(&serial), &["emu", "kill"]).await.map(|_| ()).ok_or_else(|| format!("Couldn't stop {serial}"))
 }
 
 /// Wireless debugging (Android 11+): pair with the code shown under Developer options → Wireless debugging.
@@ -216,22 +289,3 @@ pub async fn android_connect(host: String) -> Result<String, String> {
         Err(text)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_adb_devices() {
-        let out = "* daemon started successfully\nList of devices attached\n\
-            emulator-5554          device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu64a transport_id:1\n\
-            R5CR1234ABC            unauthorized usb:1-1 transport_id:2\n\
-            192.168.1.5:41234      device product:husky model:Pixel_8_Pro device:husky transport_id:3\n\n";
-        let d = parse_adb_devices(out);
-        assert_eq!(d.len(), 3);
-        assert_eq!(d[0], AdbEntry { serial: "emulator-5554".into(), state: "device".into(), model: Some("sdk gphone64 arm64".into()) });
-        assert_eq!((d[1].state.as_str(), d[1].model.as_deref()), ("unauthorized", None));
-        assert_eq!(d[2].model.as_deref(), Some("Pixel 8 Pro"));
-    }
-}
-

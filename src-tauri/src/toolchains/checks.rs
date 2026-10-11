@@ -32,7 +32,24 @@ pub struct Check {
     pub steps: Vec<Step>,
 }
 
+/// A check plus whether it's required. Optional checks (conveniences like code intelligence)
+/// are shown in the wizard but don't count against "ready".
+#[derive(Serialize)]
+pub struct Item {
+    #[serde(flatten)]
+    pub check: Check,
+    pub optional: bool,
+}
+
 impl Check {
+    pub fn required(self) -> Item {
+        Item { check: self, optional: false }
+    }
+
+    pub fn optional(self) -> Item {
+        Item { check: self, optional: true }
+    }
+
     /// Marks a missing check as waiting on an earlier step.
     pub fn block_unless(&mut self, ready: bool, reason: &str) {
         if !ready && self.status == Status::Missing {

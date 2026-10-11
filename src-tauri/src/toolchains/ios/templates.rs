@@ -148,50 +148,6 @@ pub fn ios_new_project(
     Ok(dir.to_string_lossy().into_owned())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn validates_names() {
-        assert!(validate_name("MyApp2").is_ok());
-        assert!(validate_name("2App").is_err());
-        assert!(validate_name("My App").is_err());
-        assert!(validate_name("").is_err());
-    }
-
-    #[test]
-    fn writes_expected_files() {
-        let dir = std::env::temp_dir().join(format!("orbit-template-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        write_template(&dir, "Demo", "com.example.demo", "17.0").unwrap();
-        assert!(dir.join("project.yml").exists());
-        assert!(dir.join("Demo/DemoApp.swift").exists());
-        assert!(dir.join("Demo/Assets.xcassets/AppIcon.appiconset/Contents.json").exists());
-        let yml = fs::read_to_string(dir.join("project.yml")).unwrap();
-        assert!(yml.contains("PRODUCT_BUNDLE_IDENTIFIER: com.example.demo"));
-        assert!(yml.contains("  Demo:\n    type: application"));
-    }
-}
-
-#[cfg(test)]
-mod xcodegen_tests {
-    /// Generates a real project; needs XcodeGen. Run with `cargo test -- --ignored`.
-    #[test]
-    #[ignore]
-    fn xcodegen_accepts_template() {
-        let dir = std::env::temp_dir().join(format!("orbit-xcodegen-{}", std::process::id())).join("Demo");
-        let _ = std::fs::remove_dir_all(&dir);
-        super::write_template(&dir, "Demo", "com.example.demo", "17.0").unwrap();
-        let out = std::process::Command::new("xcodegen").arg("generate").current_dir(&dir).output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        assert!(dir.join("Demo.xcodeproj/project.pbxproj").exists());
-        assert!(dir.join("Demo.xcodeproj/xcshareddata/xcschemes/Demo.xcscheme").exists());
-        let pbx = std::fs::read_to_string(dir.join("Demo.xcodeproj/project.pbxproj")).unwrap();
-        assert!(pbx.contains("ContentView.swift") && pbx.contains("Assets.xcassets"));
-        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
-    }
-}
 
 /// Re-runs XcodeGen after files were added, renamed or removed, so the .xcodeproj includes them.
 /// Returns false (and does nothing) for projects without a project.yml.

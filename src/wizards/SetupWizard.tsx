@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Check } from "../lib/ipc";
 import { isReady, useSetup } from "../state/setup";
 import { useUi } from "../state/ui";
-import { IconCheck, IconChevronDown, IconChevronRight, IconClose, IconCopy } from "../components/Icons";
+import { IconCheck, IconClose, IconCopy } from "../components/Icons";
 
 /** How often to re-check while the window is open, so steps tick off as commands finish. */
 const POLL_MS = 5000;
@@ -55,30 +55,48 @@ function CheckRow({
   check,
   index,
   current,
-  open,
-  onToggle,
+  selected,
+  onSelect,
 }: {
   check: Check;
   index: number;
   current: boolean;
-  open: boolean;
-  onToggle: () => void;
+  selected: boolean;
+  onSelect: () => void;
 }) {
-  const expandable = check.status !== "ok" && check.steps.length > 0;
   return (
-    <li className={`setup-step status-${check.status}${current ? " current" : ""}${open ? " open" : ""}`}>
-      <button className="setup-step-head" onClick={onToggle} disabled={!expandable}>
+    <li
+      className={`setup-step status-${check.status}${current ? " current" : ""}${selected ? " selected" : ""}${check.optional ? " optional" : ""}`}
+    >
+      <button className="setup-step-head" onClick={onSelect} aria-current={selected}>
         <StepMarker check={check} index={index} current={current} />
         <span className="setup-step-text">
           <span className="setup-step-label">{check.label}</span>
           <span className="setup-step-detail">{check.detail}</span>
         </span>
         {current && <span className="setup-step-tag">Next</span>}
-        {expandable && (
-          <span className="setup-step-chevron">{open ? <IconChevronDown /> : <IconChevronRight />}</span>
-        )}
+        {check.optional && check.status !== "ok" && <span className="setup-step-tag optional">Optional</span>}
       </button>
-      {open && expandable && (
+    </li>
+  );
+}
+
+/** The selected step in full: what it is, and the commands that fix it. */
+function CheckDetail({ check }: { check: Check }) {
+  return (
+    <div className="setup-detail">
+      <div className="setup-detail-head">
+        <h2>{check.label}</h2>
+        {check.optional && <span className="setup-step-tag optional">Optional</span>}
+      </div>
+      <p className="muted">{check.detail}</p>
+      {check.status === "ok" ? (
+        <p className="setup-detail-done">
+          <IconCheck /> Installed. Nothing to do here.
+        </p>
+      ) : check.status === "blocked" ? (
+        <p className="muted">This step unlocks once the steps before it are done.</p>
+      ) : (
         <ol className="setup-instructions">
           {check.steps.map((s, i) => (
             <li key={i}>
@@ -88,7 +106,7 @@ function CheckRow({
           ))}
         </ol>
       )}
-    </li>
+    </div>
   );
 }
 
@@ -115,11 +133,17 @@ export default function SetupWizard() {
   const setShowSetup = useUi((s) => s.setShowSetup);
   const setShowNewProject = useUi((s) => s.setShowNewProject);
   const ready = isReady(checks);
-  const next = checks?.find((c) => c.status === "missing")?.id ?? null;
-  const [openId, setOpenId] = useState<string | null>(null);
+  // The next step to highlight is the first required one that's missing.
+  const next = checks?.find((c) => c.status === "missing" && !c.optional)?.id ?? null;
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Follow the user's progress: whenever the next step changes, expand it.
-  useEffect(() => setOpenId(next), [next]);
+  // Follow the user's progress: whenever the next step changes, show it.
+  useEffect(() => setSelectedId(next), [next]);
+  const selected =
+    checks?.find((c) => c.id === selectedId) ??
+    checks?.find((c) => c.status === "missing") ??
+    checks?.[0] ??
+    null;
 
   // Re-check on open, periodically, and when the user comes back from Terminal.
   useEffect(() => {
@@ -134,12 +158,14 @@ export default function SetupWizard() {
     };
   }, [refresh, ready, platform]);
 
-  const done = checks?.filter((c) => c.status === "ok").length ?? 0;
-  const total = checks?.length ?? 7;
+  const required = checks?.filter((c) => !c.optional) ?? [];
+  const done = required.filter((c) => c.status === "ok").length;
+  const total = checks ? required.length : 7;
+  const optionalCount = (checks?.length ?? 0) - required.length;
 
   return (
     <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="setup-title">
-      <div className="setup">
+      <div className="setup setup-wide">
         <header className="setup-header">
           <div>
             <h1 id="setup-title">{ready ? "You're all set" : copy.title}</h1>
@@ -159,37 +185,38 @@ export default function SetupWizard() {
 
         <div className="setup-progress">
           <ol className="stepper" aria-hidden="true">
-            {(checks ?? Array.from({ length: total }, () => null)).map((c, i) => (
+            {(checks ? required : Array.from({ length: total }, () => null)).map((c, i) => (
               <li key={i} className={c?.status === "ok" ? "done" : c?.id === next ? "current" : ""} />
             ))}
           </ol>
           <span className="setup-progress-text">
-            {checks === null ? "Checking your Mac…" : `${done} of ${total} complete`}
+            {checks === null
+              ? "Checking your Mac…"
+              : `${done} of ${total} complete${optionalCount ? ` · ${optionalCount} optional` : ""}`}
             {checking && checks !== null && <span className="spinner" />}
           </span>
         </div>
 
-        <ol className="setup-steps">
-          {checks === null
-            ? Array.from({ length: total }, (_, i) => <li key={i} className="setup-step skeleton" />)
-            : checks.map((c, i) => (
-                <CheckRow
-                  key={c.id}
-                  check={c}
-                  index={i}
-                  current={c.id === next}
-                  open={openId === c.id}
-                  onToggle={() => setOpenId(openId === c.id ? null : c.id)}
-                />
-              ))}
-        </ol>
+        <div className="setup-body">
+          <ol className="setup-steps">
+            {checks === null
+              ? Array.from({ length: total }, (_, i) => <li key={i} className="setup-step skeleton" />)
+              : checks.map((c, i) => (
+                  <CheckRow
+                    key={c.id}
+                    check={c}
+                    index={i}
+                    current={c.id === next}
+                    selected={selected?.id === c.id}
+                    onSelect={() => setSelectedId(c.id)}
+                  />
+                ))}
+          </ol>
+          {selected ? <CheckDetail check={selected} /> : <div className="setup-detail skeleton" />}
+        </div>
 
         <footer className="setup-footer">
-          {ready && platform === "android" ? (
-            <button className="btn primary" onClick={() => setShowSetup(false)}>
-              Close
-            </button>
-          ) : ready ? (
+          {ready ? (
             <>
               <button className="btn" onClick={() => setShowSetup(false)}>
                 Close
@@ -198,10 +225,10 @@ export default function SetupWizard() {
                 className="btn primary"
                 onClick={() => {
                   setShowSetup(false);
-                  setShowNewProject(true);
+                  setShowNewProject(platform);
                 }}
               >
-                Create an iOS app
+                {platform === "android" ? "Create an Android app" : "Create an iOS app"}
               </button>
             </>
           ) : (

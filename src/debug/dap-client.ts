@@ -14,8 +14,9 @@ export class DapClient {
 
   private constructor(readonly bridgeId: number) {}
 
-  static async start(cwd: string): Promise<DapClient> {
-    const id = await invoke<number>("dap_start", { root: cwd });
+  /** Starts lldb-dap, or `adapter` (e.g. kotlin-debug-adapter) when given. */
+  static async start(cwd: string, adapter?: { program: string; args: string[] }): Promise<DapClient> {
+    const id = await invoke<number>("dap_start", { root: cwd, program: adapter?.program, args: adapter?.args });
     const client = new DapClient(id);
     client.unlisten.push(
       await listen<string>(`lsp://${id}/message`, (e) => client.receive(JSON.parse(e.payload))),
@@ -24,6 +25,8 @@ export class DapClient {
         client.onExit();
       }),
     );
+    // Output is held back until we listen, so nothing (not even an immediate crash) is missed.
+    await invoke("lsp_attach", { id });
     return client;
   }
 

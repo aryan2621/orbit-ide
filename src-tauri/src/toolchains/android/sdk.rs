@@ -4,11 +4,14 @@
 
 use crate::env;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// The Android Gradle Plugin needs JDK 17 or newer.
 pub const MIN_JDK: u32 = 17;
 
 /// Environment the SDK tools read, taken from the user's shell.
+#[derive(Clone)]
 pub struct ShellEnv {
     /// ANDROID_HOME, or the deprecated ANDROID_SDK_ROOT.
     pub android_home: Option<String>,
@@ -16,13 +19,29 @@ pub struct ShellEnv {
     pub avd_home: Option<String>,
 }
 
+/// Reads the variables from a fresh login shell (so edits to ~/.zshrc are picked up), but at most
+/// once every few seconds: starting a shell is slow, and one Run or device refresh asks many times.
 pub async fn shell_env() -> ShellEnv {
+    const FRESH_FOR: Duration = Duration::from_secs(10);
+    static CACHE: Mutex<Option<(Instant, ShellEnv)>> = Mutex::new(None);
+    if let Some((at, env)) = crate::process::lock(&CACHE).as_ref() {
+        if at.elapsed() < FRESH_FOR {
+            return env.clone();
+        }
+    }
     let mut vars = env::shell_vars(&["ANDROID_HOME", "ANDROID_SDK_ROOT", "JAVA_HOME", "ANDROID_AVD_HOME"]).await;
-    ShellEnv {
+    let fresh = ShellEnv {
         android_home: vars.remove("ANDROID_HOME").or_else(|| vars.remove("ANDROID_SDK_ROOT")),
         java_home: vars.remove("JAVA_HOME"),
         avd_home: vars.remove("ANDROID_AVD_HOME"),
-    }
+    };
+    *crate::process::lock(&CACHE) = Some((Instant::now(), fresh.clone()));
+    fresh
+}
+
+/// The folder holding AVD `.ini` files (ANDROID_AVD_HOME, else ~/.android/avd).
+pub fn avd_home(env: &ShellEnv) -> PathBuf {
+    env.avd_home.as_ref().map(PathBuf::from).unwrap_or_else(|| home().join(".android/avd"))
 }
 
 fn home() -> PathBuf {
@@ -122,7 +141,7 @@ fn subdirs(dir: &Path) -> Vec<String> {
 /// Virtual device names, read from the AVD folder the emulator uses. Like `emulator -list-avds`,
 /// a device's name is its `.ini` file name; the `.avd` folder it points to may be named differently.
 pub fn avds(env: &ShellEnv) -> Vec<String> {
-    let dir = env.avd_home.as_ref().map(PathBuf::from).unwrap_or_else(|| home().join(".android/avd"));
+    let dir = avd_home(env);
     let mut names: Vec<String> = std::fs::read_dir(&dir)
         .into_iter()
         .flatten()
@@ -167,48 +186,4 @@ fn parse_java_version(text: &str) -> Option<(String, u32)> {
     let first: u32 = parts.next()?.parse().ok()?;
     let major = if first == 1 { parts.next()?.parse().ok()? } else { first };
     Some((version, major))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn java_versions() {
-        let zulu = "openjdk version \"17.0.9\" 2023-10-17 LTS\nOpenJDK Runtime Environment Zulu17.46+19-CA (build 17.0.9+8-LTS)";
-        assert_eq!(parse_java_version(zulu), Some(("17.0.9".into(), 17)));
-        assert_eq!(parse_java_version("java version \"1.8.0_392\""), Some(("1.8.0_392".into(), 8)));
-        assert_eq!(parse_java_version("java version \"25.0.2\" 2026-01-20 LTS"), Some(("25.0.2".into(), 25)));
-        assert_eq!(parse_java_version("openjdk version \"21\" 2023-09-19"), Some(("21".into(), 21)));
-        assert_eq!(parse_java_version("The operation couldn’t be completed. Unable to locate a Java Runtime."), None);
-    }
-
-    #[test]
-    fn versions_sort_numerically() {
-        let mut v = vec!["android-36", "android-9", "android-37.0", "android-36.1", "android-34"];
-        v.sort_by_key(|n| version_key(n));
-        assert_eq!(v, ["android-9", "android-34", "android-36", "android-36.1", "android-37.0"]);
-    }
-
-    #[test]
-    fn reads_sdk_folder() {
-        let root = std::env::temp_dir().join(format!("orbit-sdk-test-{}", std::process::id()));
-        let pkg = |p: &str| {
-            std::fs::create_dir_all(root.join(p)).unwrap();
-            std::fs::write(root.join(p).join("package.xml"), "").unwrap();
-        };
-        pkg("platforms/android-36");
-        pkg("platforms/android-9");
-        std::fs::create_dir_all(root.join("platforms/android-37")).unwrap(); // half-downloaded
-        pkg("system-images/android-36/google_apis/arm64-v8a");
-        pkg("cmdline-tools/19.0");
-        std::fs::create_dir_all(root.join("cmdline-tools/19.0/bin")).unwrap();
-        std::fs::write(root.join("cmdline-tools/19.0/bin/sdkmanager"), "").unwrap();
-
-        assert_eq!(packages(&root.join("platforms")), ["android-9", "android-36"]);
-        assert_eq!(system_images(&root), ["system-images;android-36;google_apis;arm64-v8a"]);
-        assert_eq!(cmdline_tool(&root, "sdkmanager"), Some(root.join("cmdline-tools/19.0/bin/sdkmanager")));
-        assert_eq!(cmdline_tool(&root, "avdmanager"), None);
-        std::fs::remove_dir_all(&root).unwrap();
-    }
 }

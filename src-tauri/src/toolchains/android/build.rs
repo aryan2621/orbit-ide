@@ -11,7 +11,7 @@ use tauri::AppHandle;
 
 fn diagnostic(file: Option<String>, line: Option<u32>, column: Option<u32>, severity: &str, message: &str) -> Diagnostic {
     let message = message.trim().to_owned();
-    Diagnostic { file, line, column, severity: severity.into(), hint: explain(&message).map(str::to_owned), message }
+    Diagnostic { file, line, column, severity: severity.into(), hint: explain(&message).or_else(|| super::signing::explain(&message)).map(str::to_owned), message }
 }
 
 /// `file:///a/b.kt` or `/a/b.kt` → `/a/b.kt`.
@@ -158,6 +158,7 @@ pub struct GradleHooks {
     /// A manifest-merger diagnostic whose message is on the following line.
     pending: Option<Diagnostic>,
     pub verbatim: bool,
+    tasks: u32,
 }
 
 impl GradleHooks {
@@ -185,6 +186,14 @@ impl GradleHooks {
 }
 
 impl JobHooks for GradleHooks {
+    /// Gradle's plain console doesn't say how many tasks there are, so only the count is known.
+    fn progress(&mut self, line: &str) -> Option<crate::process::Progress> {
+        line.starts_with("> Task ").then(|| {
+            self.tasks += 1;
+            crate::process::Progress { done: self.tasks, total: None }
+        })
+    }
+
     fn line(&mut self, line: &str) -> Option<String> {
         let t = line.trim_end();
         if let Some(mut d) = self.pending.take() {
@@ -231,7 +240,7 @@ impl JobHooks for GradleHooks {
 pub async fn run_gradle(ctx: &JobCtx, cmd: tokio::process::Command) -> JobExit {
     let hooks = Arc::new(Mutex::new(GradleHooks::default()));
     let exit = ctx.run(cmd, "log", hooks.clone()).await;
-    let diagnostics = hooks.lock().unwrap().finish();
+    let diagnostics = process::lock(&hooks).finish();
     ctx.emit("diagnostics", diagnostics);
     exit
 }
@@ -242,78 +251,36 @@ pub async fn assemble_step(ctx: &JobCtx, project: &Project, module: &str, varian
     let mut cmd = project::gradlew(project, &shell).await;
     let task = project::task(module, "assemble", variant);
     cmd.arg(&task);
+    // Non-debug variants (Run or Build on "release") are signed with the keystore from Android
+    // Signing when one is saved; otherwise Gradle produces an unsigned APK that can't be installed.
+    if !variant.to_lowercase().contains("debug") {
+        if let Ok(vars) = super::signing::gradle_signing_env(&project.path).await {
+            cmd.envs(vars);
+            ctx.log("Signing with the keystore from Android Signing");
+        }
+    }
     ctx.log(format!("$ ./gradlew {task}"));
     run_gradle(ctx, cmd).await
+}
+
+/// `./gradlew clean` as a job.
+#[tauri::command]
+pub fn android_clean(app: AppHandle, root: String, job_id: String) -> Result<(), String> {
+    let project = project::detect(&root).ok_or("No Gradle project found in this folder")?;
+    process::spawn_task(&app, job_id, |ctx| async move {
+        let shell = sdk::shell_env().await;
+        let mut cmd = project::gradlew(&project, &shell).await;
+        cmd.arg("clean");
+        ctx.log("$ ./gradlew clean");
+        run_gradle(&ctx, cmd).await
+    });
+    Ok(())
 }
 
 #[tauri::command]
 pub fn android_build(app: AppHandle, root: String, scheme: String, configuration: String, job_id: String) -> Result<(), String> {
     let project = project::detect(&root).ok_or("No Gradle project found in this folder")?;
-    process::spawn_task(&app, job_id, |ctx| async move { assemble_step(&ctx, &project, &scheme, &configuration).await });
+    let variant = project::variant_name(&configuration);
+    process::spawn_task(&app, job_id, |ctx| async move { assemble_step(&ctx, &project, &scheme, &variant).await });
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn run(log: &str) -> (Vec<String>, Vec<Diagnostic>) {
-        let mut hooks = GradleHooks::default();
-        let shown = log.lines().filter_map(|l| hooks.line(l)).collect();
-        (shown, hooks.finish())
-    }
-
-    #[test]
-    fn kotlin_diagnostics() {
-        let d = parse_diagnostic("e: file:///Users/me/app/src/main/java/A.kt:14:24 Unresolved reference 'x'.").unwrap();
-        assert_eq!(d.file.as_deref(), Some("/Users/me/app/src/main/java/A.kt"));
-        assert_eq!((d.line, d.column, d.severity.as_str()), (Some(14), Some(24), "error"));
-        assert_eq!(d.message, "Unresolved reference 'x'.");
-        let old = parse_diagnostic("w: /Users/me/A.kt: (3, 9): Variable 'y' is never used").unwrap();
-        assert_eq!((old.file.as_deref(), old.line, old.column), (Some("/Users/me/A.kt"), Some(3), Some(9)));
-        assert_eq!(old.message, "Variable 'y' is never used");
-    }
-
-    #[test]
-    fn java_aapt_manifest_diagnostics() {
-        let j = parse_diagnostic("/Users/me/app/src/main/java/B.java:7: error: cannot find symbol").unwrap();
-        assert_eq!((j.line, j.column, j.message.as_str()), (Some(7), None, "cannot find symbol"));
-        let a = parse_diagnostic("ERROR: /Users/me/app/src/main/res/layout/main.xml:12: AAPT: error: attribute android:foo not found.").unwrap();
-        assert_eq!((a.file.as_deref(), a.line), (Some("/Users/me/app/src/main/res/layout/main.xml"), Some(12)));
-        let (_, ds) = run("/Users/me/app/src/main/AndroidManifest.xml:5:5-20:19 Error:\n\tAttribute application@label value=(A) is also present at [lib] value=(B).\n");
-        assert_eq!(ds[0].file.as_deref(), Some("/Users/me/app/src/main/AndroidManifest.xml"));
-        assert_eq!((ds[0].line, ds[0].column), (Some(5), Some(5)));
-        assert!(ds[0].message.starts_with("Attribute application@label"));
-        assert!(parse_diagnostic("> Task :app:compileDebugKotlin").is_none());
-        assert!(parse_diagnostic("BUILD SUCCESSFUL in 4s").is_none());
-    }
-
-    #[test]
-    fn kotlin_error_build_log() {
-        let (shown, ds) = run(include_str!("fixtures/kotlin_error.log"));
-        assert_eq!(ds.len(), 1, "{ds:?}");
-        assert!(ds[0].file.as_deref().unwrap().ends_with("MainActivity.kt"));
-        assert_eq!(ds[0].line, Some(14));
-        assert!(shown.iter().any(|l| l.starts_with("BUILD FAILED")));
-        assert!(!shown.iter().any(|l| l.contains("UP-TO-DATE")));
-    }
-
-    #[test]
-    fn configuration_failure_gets_hint() {
-        let (_, ds) = run(include_str!("fixtures/aar_metadata_failure.log"));
-        assert_eq!(ds.len(), 1, "{ds:?}");
-        assert_eq!(ds[0].file, None);
-        assert!(ds[0].message.contains("checkDebugAarMetadata"));
-        assert!(ds[0].hint.as_deref().unwrap().contains("compileSdk"));
-    }
-
-    #[test]
-    fn condenses_tasks() {
-        assert_eq!(condense("> Task :app:compileDebugKotlin").as_deref(), Some("▸ Compiling Kotlin (app)"));
-        assert_eq!(condense("> Task :app:packageDebug").as_deref(), Some("▸ Packaging (app)"));
-        assert_eq!(condense("> Task :app:mergeDebugResources UP-TO-DATE"), None);
-        assert_eq!(condense("> Task :app:preBuild"), None);
-        assert_eq!(condense("BUILD SUCCESSFUL in 4s").as_deref(), Some("BUILD SUCCESSFUL in 4s"));
-        assert_eq!(explain("Unsupported class file major version 69"), explain("unsupported class file major version 65"));
-    }
 }

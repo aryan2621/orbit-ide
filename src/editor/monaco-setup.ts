@@ -15,6 +15,20 @@ self.MonacoEnvironment = {
 
 loader.config({ monaco });
 
+// Let these reach the app's own palette (Layout) instead of Monaco's built-in pickers.
+const { KeyMod, KeyCode } = monaco;
+monaco.editor.addKeybindingRules([
+  { keybinding: KeyMod.WinCtrl | KeyCode.KeyG, command: null },
+  { keybinding: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyO, command: null },
+  // ⌘. is Stop (Xcode); quick fixes use ⌥↩ like Android Studio.
+  { keybinding: KeyMod.CtrlCmd | KeyCode.Period, command: null },
+  { keybinding: KeyMod.Alt | KeyCode.Enter, command: "editor.action.quickFix", when: "textInputFocus && !editorReadonly" },
+]);
+
+/** The Monaco model URI for a file path. `Uri.file` escapes `#`, `?` and `%`, which `Uri.parse`
+ * would read as a fragment, query or escape and so mismatch the file. */
+export const modelUri = (path: string) => monaco.Uri.file(path);
+
 const EXT_LANG: Record<string, string> = {
   swift: "swift",
   m: "objective-c",
@@ -42,6 +56,8 @@ const EXT_LANG: Record<string, string> = {
   css: "css",
   html: "html",
   gradle: "groovy",
+  groovy: "groovy",
+  toml: "toml",
 };
 
 export function languageForPath(path: string): string {
@@ -49,6 +65,78 @@ export function languageForPath(path: string): string {
   if (name === "Podfile" || name === "Fastfile" || name === "Gemfile") return "ruby";
   const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
   return EXT_LANG[ext] ?? "plaintext";
+}
+
+// Monaco has no Groovy (build.gradle) or TOML (libs.versions.toml) highlighting: register small
+// Monarch tokenizers unless a future Monaco brings its own.
+const registered = new Set(monaco.languages.getLanguages().map((l) => l.id));
+if (!registered.has("groovy")) {
+  monaco.languages.register({ id: "groovy", extensions: [".gradle", ".groovy"] });
+  monaco.languages.setLanguageConfiguration("groovy", {
+    comments: { lineComment: "//", blockComment: ["/*", "*/"] },
+    brackets: [["{", "}"], ["[", "]"], ["(", ")"]],
+    autoClosingPairs: [
+      { open: "{", close: "}" },
+      { open: "[", close: "]" },
+      { open: "(", close: ")" },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+    ],
+  });
+  monaco.languages.setMonarchTokensProvider("groovy", {
+    keywords: [
+      "def", "class", "interface", "enum", "if", "else", "for", "while", "do", "return", "new", "import", "package",
+      "true", "false", "null", "in", "as", "try", "catch", "finally", "throw", "static", "final", "void", "this", "super",
+      "switch", "case", "default", "break", "continue", "extends", "implements", "public", "private", "protected",
+    ],
+    tokenizer: {
+      root: [
+        [/\/\/.*$/, "comment"],
+        [/\/\*/, "comment", "@comment"],
+        [/"""/, "string", "@tripleDouble"],
+        [/'''/, "string", "@tripleSingle"],
+        [/"([^"\\]|\\.)*"/, "string"],
+        [/'([^'\\]|\\.)*'/, "string"],
+        [/\d+(\.\d+)?[lLfFdDgG]?/, "number"],
+        [/[A-Z][\w$]*/, "type"],
+        [/[a-zA-Z_$][\w$]*/, { cases: { "@keywords": "keyword", "@default": "identifier" } }],
+      ],
+      comment: [
+        [/[^/*]+/, "comment"],
+        [/\*\//, "comment", "@pop"],
+        [/[/*]/, "comment"],
+      ],
+      tripleDouble: [[/"""/, "string", "@pop"], [/./, "string"]],
+      tripleSingle: [[/'''/, "string", "@pop"], [/./, "string"]],
+    },
+  } as monaco.languages.IMonarchLanguage);
+}
+if (!registered.has("toml")) {
+  monaco.languages.register({ id: "toml", extensions: [".toml"] });
+  monaco.languages.setLanguageConfiguration("toml", {
+    comments: { lineComment: "#" },
+    brackets: [["{", "}"], ["[", "]"]],
+    autoClosingPairs: [
+      { open: "{", close: "}" },
+      { open: "[", close: "]" },
+      { open: '"', close: '"' },
+    ],
+  });
+  monaco.languages.setMonarchTokensProvider("toml", {
+    tokenizer: {
+      root: [
+        [/#.*$/, "comment"],
+        [/^\s*\[\[?[^\]]+\]\]?/, "type"],
+        [/[\w.-]+(?=\s*=)/, "keyword"],
+        [/"""/, "string", "@multi"],
+        [/"([^"\\]|\\.)*"/, "string"],
+        [/'[^']*'/, "string"],
+        [/\b(true|false)\b/, "keyword"],
+        [/[+-]?\d[\d_]*(\.\d+)?([eE][+-]?\d+)?/, "number"],
+      ],
+      multi: [[/"""/, "string", "@pop"], [/./, "string"]],
+    },
+  });
 }
 
 // Editor themes matching the app palette (see styles.css tokens).

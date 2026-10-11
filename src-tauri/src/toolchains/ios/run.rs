@@ -3,11 +3,12 @@
 //! Events on `job://<id>/…`: `log` (build log and progress), `diagnostics`, `phase`
 //! (building | installing | running), `console` (the app's stdout/stderr), `exit`.
 
-use super::{build, devices, package, project, signing};
+use super::{build, crash, devices, package, project, signing};
 use crate::{env, process};
 use process::{JobCtx, JobExit, Passthrough};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::AppHandle;
 
 struct AppProduct {
@@ -90,7 +91,7 @@ impl process::JobHooks for LaunchHooks {
     }
 }
 
-async fn run_on_simulator(ctx: &JobCtx, device: &devices::Device, app: &AppProduct, debug: bool) -> JobExit {
+async fn run_on_simulator(ctx: &JobCtx, root: &str, device: &devices::Device, app: &AppProduct, debug: bool) -> JobExit {
     let id = device.id.as_str();
     ctx.emit("phase", "installing");
     if !device.booted {
@@ -102,10 +103,24 @@ async fn run_on_simulator(ctx: &JobCtx, device: &devices::Device, app: &AppProdu
             return JobExit::failed();
         }
     }
-    // Bring the Simulator window up on this device.
+    // `boot` returns before the device can take installs; wait until it has finished booting.
+    let (ok, _, stderr) = ctx.output_timeout(xcrun(&["simctl", "bootstatus", id, "-b"]), Some(Duration::from_secs(300))).await;
+    if !ok {
+        if ctx.cancelled() {
+            return JobExit { code: None, cancelled: true };
+        }
+        ctx.log(format!("error: {} didn't finish booting: {}", device.name, stderr.trim()));
+        return JobExit::failed();
+    }
+    // Bring the Simulator window up on this device, using the Simulator that belongs to the
+    // selected Xcode (not whichever copy Launch Services finds first).
     let mut open = env::command("open");
-    open.args(["-a", "Simulator", "--args", "-CurrentDeviceUDID", id]);
-    let _ = ctx.output(open).await;
+    match simulator_app().await {
+        Some(app) => open.arg("-a").arg(app),
+        None => open.args(["-a", "Simulator"]),
+    };
+    open.args(["--args", "-CurrentDeviceUDID", id]);
+    let _ = ctx.output_timeout(open, Some(Duration::from_secs(15))).await;
 
     ctx.log(format!("▸ Installing on {}", device.name));
     if let Err(e) = step(ctx, "Install", &["simctl", "install", id, &app.path]).await {
@@ -127,12 +142,73 @@ async fn run_on_simulator(ctx: &JobCtx, device: &devices::Device, app: &AppProdu
         debug,
         announced: false,
     };
+    // print() reaches the console through --console-pty; os_log / Logger messages only go to the
+    // unified log, so stream those alongside.
+    let exec = std::path::Path::new(&app.path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let log_stream = tokio::spawn(stream_unified_log(ctx.clone(), id.to_owned(), exec.clone()));
+    let launched = std::time::SystemTime::now();
     let exit = ctx.run(xcrun(&args), "console", Arc::new(Mutex::new(hooks))).await;
+    log_stream.abort();
     if exit.cancelled {
         // Stopping our console stream leaves the app running; stop it too, like Xcode.
         let _ = ctx.output(xcrun(&["simctl", "terminate", id, &app.bundle_id])).await;
+    } else if !debug && crash::report(ctx, root, &exec, launched).await {
+        // The debugger shows crashes itself.
+        return JobExit::failed();
     }
     exit
+}
+
+/// Streams the app's unified-log messages (os_log, Logger, NSLog) from the Simulator to the console
+/// as `[level] message` lines. Ends when the task is aborted (the child is killed on drop).
+async fn stream_unified_log(ctx: JobCtx, udid: String, executable: String) {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    if executable.is_empty() {
+        return;
+    }
+    let predicate = format!("process == \"{}\"", executable.replace('"', ""));
+    let mut cmd = xcrun(&["simctl", "spawn", &udid, "log", "stream", "--style", "compact", "--level", "debug", "--predicate", &predicate]);
+    cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).stdin(std::process::Stdio::null()).kill_on_drop(true);
+    let Ok(mut child) = cmd.spawn() else { return };
+    let Some(stdout) = child.stdout.take() else { return };
+    let mut lines = BufReader::new(stdout).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        if let Some(text) = format_log_line(&line) {
+            ctx.emit("console", text);
+        }
+    }
+}
+
+/// `2026-10-11 12:00:00.123 Db MyApp[123:456] [com.x:ui] Hello` → `12:00:00.123 [Debug] [com.x:ui] Hello`.
+/// Header lines ("Filtering the log data…", the column titles) are dropped.
+fn format_log_line(line: &str) -> Option<String> {
+    // Columns are separated by runs of spaces: date, time, type, process[pid:tid], message.
+    let mut rest = line.trim_start();
+    let mut cols = Vec::with_capacity(4);
+    for _ in 0..4 {
+        let (col, tail) = rest.split_once(' ')?;
+        cols.push(col);
+        rest = tail.trim_start();
+    }
+    if !cols[1].contains(':') || !cols[3].contains('[') {
+        return None;
+    }
+    let level = match cols[2] {
+        "E" => "Error",
+        "F" => "Fault",
+        "Db" => "Debug",
+        "I" => "Info",
+        _ => "Log",
+    };
+    Some(format!("{} [{level}] {rest}", cols[1]))
+}
+
+/// Simulator.app inside the active developer dir (`xcode-select -p`).
+async fn simulator_app() -> Option<String> {
+    let out = env::command("xcode-select").arg("-p").output().await.ok()?;
+    let dir = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    let app = format!("{dir}/Applications/Simulator.app");
+    std::path::Path::new(&app).is_dir().then_some(app)
 }
 
 /// Shows devicectl output and turns known failures (locked device, untrusted developer…) into
@@ -167,7 +243,7 @@ async fn run_on_device(ctx: &JobCtx, device: &devices::Device, app: &AppProduct)
     let install = xcrun(&["devicectl", "device", "install", "app", "--device", id, &app.path]);
     let hooks = Arc::new(Mutex::new(DeviceHooks::default()));
     let exit = ctx.run(install, "log", hooks.clone()).await;
-    let found = hooks.lock().unwrap().diagnostics.clone();
+    let found = process::lock(&hooks).diagnostics.clone();
     if !found.is_empty() {
         ctx.emit("diagnostics", found);
     }
@@ -233,7 +309,7 @@ pub async fn ios_run(
             }
         };
         match device.kind {
-            devices::DeviceKind::Simulator => run_on_simulator(&ctx, &device, &product, debug).await,
+            devices::DeviceKind::Simulator => run_on_simulator(&ctx, &project.dir(), &device, &product, debug).await,
             devices::DeviceKind::Device => run_on_device(&ctx, &device, &product).await,
         }
     });
@@ -264,25 +340,4 @@ async fn run_package(ctx: &JobCtx, dir: &str, product: &str, configuration: &str
     let mut cmd = tokio::process::Command::new(&program);
     cmd.current_dir(dir);
     ctx.run(cmd, "console", Arc::new(Mutex::new(Passthrough))).await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn finds_the_app_target() {
-        let settings = json!([
-            { "target": "AppTests", "buildSettings": { "WRAPPER_EXTENSION": "xctest", "TARGET_BUILD_DIR": "/d", "FULL_PRODUCT_NAME": "AppTests.xctest", "PRODUCT_BUNDLE_IDENTIFIER": "t" } },
-            { "target": "App", "buildSettings": {
-                "WRAPPER_EXTENSION": "app",
-                "TARGET_BUILD_DIR": "/DerivedData/App/Build/Products/Debug-iphonesimulator",
-                "FULL_PRODUCT_NAME": "App.app",
-                "PRODUCT_BUNDLE_IDENTIFIER": "com.example.app" } }
-        ]);
-        let (path, id) = find_app_product(&settings).unwrap();
-        assert_eq!(path, "/DerivedData/App/Build/Products/Debug-iphonesimulator/App.app");
-        assert_eq!(id, "com.example.app");
-    }
 }

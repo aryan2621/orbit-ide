@@ -2,6 +2,8 @@ import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { DirEntry, filesApi, fsApi, regenerateProject } from "../lib/ipc";
 import { useWorkspace } from "../state/workspace";
+import { pathMoved } from "../editor/model-sync";
+import { useUi } from "../state/ui";
 import { useGit } from "../state/git";
 import { openContextMenu } from "../components/ContextMenu";
 import {
@@ -25,8 +27,8 @@ function useGitDecorations() {
   if (status?.repo_root) {
     for (const c of status.changes) {
       const abs = `${status.repo_root}/${c.path}`;
-      // Unstaged wins for display; untracked shows as "U"ntracked/added.
-      if (!map.has(abs) || !c.staged) map.set(abs, c.status === "?" ? "A" : c.status);
+      // Unstaged wins for display; untracked shows as added, a conflict as "C".
+      if (!map.has(abs) || !c.staged) map.set(abs, c.status === "?" ? "A" : c.status === "U" ? "C" : c.status);
     }
   }
   return map;
@@ -96,7 +98,7 @@ function TreeNode({
   decorations: Map<string, string>;
 }) {
   const [open, setOpen] = useState(expanded.has(entry.path));
-  const { activePath, openFile, root, pathMoved } = useWorkspace();
+  const { activePath, openFile, root } = useWorkspace();
   const toggle = (next = !open) => {
     if (next) expanded.add(entry.path);
     else expanded.delete(entry.path);
@@ -127,6 +129,7 @@ function TreeNode({
       null,
       { label: "Rename", shortcut: "↩", onSelect: () => setPending({ kind: "rename", path: entry.path }) },
       { label: "Reveal in Finder", onSelect: () => revealItemInDir(entry.path) },
+      !entry.is_dir && { label: "File History", onSelect: () => useGit.getState().showHistory(entry.path) },
       { label: "Copy Path", onSelect: () => navigator.clipboard.writeText(entry.path) },
       null,
       { label: "Move to Trash", danger: true, onSelect: remove },
@@ -142,6 +145,8 @@ function TreeNode({
         onDone={async (name) => {
           setPending(null);
           if (!name) return;
+          const invalid = invalidName(name);
+          if (invalid) return useWorkspace.setState({ error: invalid });
           const to = entry.path.slice(0, entry.path.lastIndexOf("/") + 1) + name;
           try {
             await filesApi.rename(entry.path, to);
@@ -193,11 +198,12 @@ function DirChildren({
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const treeVersion = useWorkspace((s) => s.treeVersion);
+  const folderVersion = useWorkspace((s) => s.folderVersions[path] ?? 0);
   const { root, openFile } = useWorkspace();
 
   useEffect(() => {
     fsApi.readDir(path).then(setEntries, (e) => setError(String(e)));
-  }, [path, treeVersion]);
+  }, [path, treeVersion, folderVersion]);
 
   if (error) return <div className="tree-error" style={{ paddingLeft: 10 + depth * 12 }}>{error}</div>;
   if (!entries) return null;
@@ -212,6 +218,8 @@ function DirChildren({
           onDone={async (name) => {
             setPending(null);
             if (!name) return;
+            const invalid = invalidName(name);
+            if (invalid) return useWorkspace.setState({ error: invalid });
             const target = `${path}/${name}`;
             try {
               await filesApi.create(target, creating.kind === "folder");
@@ -230,8 +238,21 @@ function DirChildren({
   );
 }
 
+/** The folder for ⌘N: the active file's folder when it's visible in the tree, else the root. */
+export function newFileFolder(root: string) {
+  const active = useWorkspace.getState().activePath;
+  const dir = active?.slice(0, active.lastIndexOf("/"));
+  return dir && dir.startsWith(root) && (dir === root || expanded.has(dir)) ? dir : root;
+}
+
 export default function Explorer({ root }: { root: string }) {
   const [pending, setPending] = useState<Pending>(null);
+  const newFileIn = useUi((s) => s.newFileIn);
+  useEffect(() => {
+    if (!newFileIn) return;
+    setPending({ kind: "file", parent: newFileIn });
+    useUi.getState().setNewFileIn(null);
+  }, [newFileIn]);
   const refreshTree = useWorkspace((s) => s.refreshTree);
   const decorations = useGitDecorations();
 
@@ -265,4 +286,12 @@ export default function Explorer({ root }: { root: string }) {
       </div>
     </div>
   );
+}
+
+/** Why a new file/folder name can't be used, or null. Names are single path components. */
+function invalidName(name: string): string | null {
+  if (name.includes("/") || name.includes("\\")) return `"${name}": names can't contain slashes`;
+  if (name === "." || name === "..") return `"${name}" isn't a valid name`;
+  if (name.includes("\0")) return "Names can't contain null characters";
+  return null;
 }

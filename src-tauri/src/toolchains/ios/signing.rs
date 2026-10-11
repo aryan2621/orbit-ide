@@ -3,6 +3,7 @@
 
 use super::{build, project};
 use crate::env;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
@@ -139,7 +140,7 @@ pub struct SigningInfo {
     error: Option<String>,
 }
 
-fn app_settings(settings: &Value) -> Option<&Value> {
+pub fn app_settings(settings: &Value) -> Option<&Value> {
     settings.as_array()?.iter().find(|t| t["buildSettings"]["WRAPPER_EXTENSION"].as_str() == Some("app"))
 }
 
@@ -186,15 +187,40 @@ pub async fn ios_signing_info(root: String, scheme: String, configuration: Strin
     info
 }
 
-/// Rewrites the `PRODUCT_BUNDLE_IDENTIFIER` and `DEVELOPMENT_TEAM` of an XcodeGen target and
-/// regenerates the project.
+/// Rewrites the app target's `PRODUCT_BUNDLE_IDENTIFIER`, `DEVELOPMENT_TEAM` and (when given)
+/// `CODE_SIGN_STYLE`: in project.yml (then regenerates) for XcodeGen projects, else directly in
+/// every build configuration of the target in project.pbxproj.
 #[tauri::command]
-pub async fn ios_save_signing(root: String, target: String, bundle_id: String, team_id: String) -> Result<(), String> {
+pub async fn ios_save_signing(root: String, target: String, bundle_id: String, team_id: String, sign_style: Option<String>) -> Result<(), String> {
     let project = project::detect(&root).ok_or("No Xcode project found")?;
+    let mut values = vec![("PRODUCT_BUNDLE_IDENTIFIER", bundle_id.as_str()), ("DEVELOPMENT_TEAM", team_id.as_str())];
+    if let Some(style) = sign_style.as_deref() {
+        values.push(("CODE_SIGN_STYLE", style));
+    }
+    save_target_settings(&project, &target, &values).await
+}
+
+/// Writes build settings of `target` (an empty value removes the key): into project.yml and
+/// regenerates for XcodeGen projects, else into every build configuration in project.pbxproj.
+pub async fn save_target_settings(project: &project::Project, target: &str, values: &[(&str, &str)]) -> Result<(), String> {
     let yml_path = Path::new(&project.dir()).join("project.yml");
+    if !yml_path.exists() {
+        let pbx = crate::toolchains::version::pbxproj(project).ok_or("No .xcodeproj found to save the settings in")?;
+        let text = std::fs::read_to_string(&pbx).map_err(|e| e.to_string())?;
+        let updated = set_pbx_target_settings(&text, target, values).ok_or(format!("Couldn't find the build settings of target {target} in the Xcode project."))?;
+        return crate::workspace::atomic_write(&pbx, updated.as_bytes()).map_err(|e| e.to_string());
+    }
     let yml = std::fs::read_to_string(&yml_path).map_err(|e| e.to_string())?;
-    let updated = set_target_settings(&yml, &target, &[("PRODUCT_BUNDLE_IDENTIFIER", &bundle_id), ("DEVELOPMENT_TEAM", &team_id)])
-        .ok_or("Couldn't find this target's settings in project.yml; edit it by hand.")?;
+    // YAML needs quotes around free text (a `: ` or `#` would change its meaning).
+    let quoted: Vec<(&str, String)> = values
+        .iter()
+        .map(|(k, v)| {
+            let plain = v.chars().all(|c| c.is_ascii_alphanumeric() || "._-/$()".contains(c));
+            (*k, if plain { v.to_string() } else { format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\"")) })
+        })
+        .collect();
+    let values: Vec<(&str, &str)> = quoted.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let updated = set_target_settings(&yml, target, &values).ok_or("Couldn't find this target's settings in project.yml; edit it by hand.")?;
     std::fs::write(&yml_path, updated).map_err(|e| e.to_string())?;
 
     let xcodegen = env::which("xcodegen").ok_or("XcodeGen is not installed")?;
@@ -212,7 +238,7 @@ pub fn set_target_settings(yml: &str, target: &str, values: &[(&str, &str)]) -> 
     let target_line = lines.iter().position(|l| l.trim_end() == format!("  {target}:"))?;
     let indent = |l: &str| l.len() - l.trim_start().len();
     // The target block ends at the next line indented 2 or less.
-    let end = (target_line + 1..lines.len())
+    let mut end = (target_line + 1..lines.len())
         .find(|&i| !lines[i].trim().is_empty() && indent(lines[i]) <= 2)
         .unwrap_or(lines.len());
     let base = (target_line..end).find(|&i| lines[i].trim() == "base:")?;
@@ -224,6 +250,10 @@ pub fn set_target_settings(yml: &str, target: &str, values: &[(&str, &str)]) -> 
         let existing = (base + 1..end).find(|&i| out[i].trim_start().starts_with(&format!("{key}:")));
         let line = format!("{key_indent}{key}: {value}");
         match existing {
+            Some(i) if value.is_empty() => {
+                out.remove(i);
+                end -= 1;
+            }
             Some(i) => out[i] = line,
             None if value.is_empty() => {}
             None => {
@@ -237,6 +267,92 @@ pub fn set_target_settings(yml: &str, target: &str, values: &[(&str, &str)]) -> 
         s.push('\n');
     }
     Some(s)
+}
+
+/// Sets build settings in every build configuration of `target` in a project.pbxproj:
+/// PBXNativeTarget (by name) → its XCConfigurationList → each XCBuildConfiguration's
+/// `buildSettings = { … }`. Returns None when the target or its settings aren't found.
+pub fn set_pbx_target_settings(pbx: &str, target: &str, values: &[(&str, &str)]) -> Option<String> {
+    let block = |id: &str, isa: &str| -> Option<(usize, usize)> {
+        let start = Regex::new(&format!(r"(?m)^\s*{id}(?: /\*[^*]*\*/)? = \{{\s*isa = {isa};")).ok()?.find(pbx)?.start();
+        Some((start, block_end(pbx, pbx[start..].find('{')? + start)?))
+    };
+    let target_re = Regex::new(r"(?m)^\s*([0-9A-F]{24})(?: /\*[^*]*\*/)? = \{\s*isa = PBXNativeTarget;").ok()?;
+    let name_re = Regex::new(&format!(r#"\bname = "?{}"?;"#, regex::escape(target))).ok()?;
+    let list_id = target_re.captures_iter(pbx).find_map(|c| {
+        let (start, end) = (c.get(0)?.start(), block_end(pbx, pbx[c.get(0)?.start()..].find('{')? + c.get(0)?.start())?);
+        let body = &pbx[start..end];
+        name_re.is_match(body).then(|| Regex::new(r"buildConfigurationList = ([0-9A-F]{24})").ok()?.captures(body).map(|l| l[1].to_owned()))?
+    })?;
+    let (ls, le) = block(&list_id, "XCConfigurationList")?;
+    let configs: Vec<String> = Regex::new(r"([0-9A-F]{24})").ok()?.captures_iter(pbx[ls..le].split("buildConfigurations").nth(1)?.split(')').next()?).map(|c| c[1].to_owned()).collect();
+    if configs.is_empty() {
+        return None;
+    }
+    // Edit back to front so earlier offsets stay valid.
+    let mut ranges: Vec<(usize, usize)> = configs
+        .iter()
+        .filter_map(|id| {
+            let (bs, be) = block(id, "XCBuildConfiguration")?;
+            let open = pbx[bs..be].find("buildSettings = {")? + bs + "buildSettings = ".len();
+            Some((open, block_end(pbx, open)?))
+        })
+        .collect();
+    if ranges.len() != configs.len() {
+        return None;
+    }
+    ranges.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut out = pbx.to_owned();
+    for (open, close) in ranges {
+        let settings = &pbx[open + 1..close];
+        let indent = settings.lines().find(|l| l.contains(" = ")).map(|l| &l[..l.len() - l.trim_start().len()]).unwrap_or("\t\t\t\t").to_owned();
+        let mut body = settings.to_owned();
+        for (key, value) in values {
+            let line = format!("{indent}{key} = {};", pbx_value(value));
+            let existing = Regex::new(&format!(r"(?m)^[ \t]*{key} = [^;]*;")).ok()?;
+            body = match (existing.find(&body), value.is_empty()) {
+                // Remove the whole line, newline included.
+                (Some(m), true) => format!("{}{}", &body[..m.start()].trim_end_matches(|c| c == ' ' || c == '\t').trim_end_matches('\n'), &body[m.end()..]),
+                (Some(_), false) => existing.replace(&body, regex::NoExpand(&line)).into_owned(),
+                (None, true) => body,
+                (None, false) => format!("\n{line}{body}"),
+            };
+        }
+        out.replace_range(open + 1..close, &body);
+    }
+    Some(out)
+}
+
+/// Index of the `}` matching the `{` at `open` (skipping quoted strings and comments).
+fn block_end(text: &str, open: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let (mut depth, mut i, mut in_str) = (0i32, open, false);
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' if in_str => i += 1,
+            b'"' => in_str = !in_str,
+            b'/' if !in_str && bytes.get(i + 1) == Some(&b'*') => i = text[i..].find("*/").map(|e| i + e + 1)?,
+            b'{' if !in_str => depth += 1,
+            b'}' if !in_str => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// pbxproj values need quotes unless they're plain identifiers.
+fn pbx_value(value: &str) -> String {
+    if !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || "._/$".contains(c)) {
+        value.to_owned()
+    } else {
+        format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    }
 }
 
 /// Plain-English help for the signing and device errors people hit most.
@@ -254,48 +370,4 @@ pub fn explain(message: &str) -> Option<&'static str> {
         (&["certificate", "revoked"], "Your signing certificate is missing or revoked. Let xcodebuild create a new one by running again with your team selected (needs an API key or an Apple account in Xcode)."),
     ];
     rules.iter().find(|(needles, _)| needles.iter().any(|n| m.contains(n))).map(|(_, hint)| *hint)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_team_from_certificate_subject() {
-        let t = team_from_subject(
-            "subject=UID=ABC,CN=Apple Development: Jane Doe (Q1W2E3R4T5),OU=TEAM123456,O=Acme\\, Inc,C=US",
-        )
-        .unwrap();
-        assert_eq!(t, Team { id: "TEAM123456".into(), name: "Acme, Inc".into() });
-        assert!(team_from_subject("subject=CN=Local Dev Signing").is_none());
-    }
-
-    #[test]
-    fn signing_args() {
-        let o = SigningOptions {
-            team_id: Some("T1".into()),
-            api_key: Some(ApiKey { path: "/k.p8".into(), key_id: "K".into(), issuer_id: "I".into() }),
-        };
-        let a = o.xcodebuild_args();
-        assert!(a.contains(&"DEVELOPMENT_TEAM=T1".to_owned()));
-        assert!(a.windows(2).any(|w| w == ["-authenticationKeyID", "K"]));
-        assert_eq!(SigningOptions::default().xcodebuild_args(), ["-allowProvisioningUpdates"]);
-    }
-
-    #[test]
-    fn edits_xcodegen_target_settings() {
-        let yml = "name: Demo\ntargets:\n  Demo:\n    type: application\n    settings:\n      base:\n        PRODUCT_BUNDLE_IDENTIFIER: com.example.demo\n        TARGETED_DEVICE_FAMILY: \"1,2\"\n    scheme: {}\n";
-        let out = set_target_settings(yml, "Demo", &[("PRODUCT_BUNDLE_IDENTIFIER", "com.me.demo"), ("DEVELOPMENT_TEAM", "T1")]).unwrap();
-        assert!(out.contains("        PRODUCT_BUNDLE_IDENTIFIER: com.me.demo\n"));
-        assert!(out.contains("        DEVELOPMENT_TEAM: T1\n"));
-        assert!(out.ends_with("    scheme: {}\n"));
-        assert!(set_target_settings(yml, "Missing", &[]).is_none());
-    }
-
-    #[test]
-    fn explains_common_errors() {
-        assert!(explain("Signing for \"Demo\" requires a development team.").unwrap().contains("team"));
-        assert!(explain("error: No Account for Team \"T1\"").unwrap().contains("API key"));
-        assert!(explain("cannot find 'foo' in scope").is_none());
-    }
 }

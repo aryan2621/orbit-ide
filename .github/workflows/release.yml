@@ -1,0 +1,96 @@
+# Builds Orbit and publishes it as a GitHub Release when a version tag is pushed:
+#   git tag v1.0.0 && git push origin v1.0.0
+# GitHub Releases is the only place Orbit is distributed. Builds are ad-hoc signed (no Apple
+# Developer account), so macOS asks users to allow the app the first time they open it.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15 # Apple Silicon: builds the Metal llama-server natively
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the app version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          conf=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          pkg=$(node -p "require('./package.json').version")
+          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
+          if [[ "$tag" != "$conf" || "$tag" != "$pkg" || "$tag" != "$cargo" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match versions (tauri.conf.json $conf, package.json $pkg, Cargo.toml $cargo)"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Cache llama-server
+        id: llama
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/binaries
+          key: llama-server-${{ hashFiles('scripts/build-llama-server.sh') }}
+
+      - name: Build llama-server
+        if: steps.llama.outputs.cache-hit != 'true'
+        run: scripts/build-llama-server.sh
+
+      - run: npm ci
+
+      # Auto-update needs the updater signing key (free, no Apple account; see RELEASING.md).
+      # Without it the release still works, but installed copies won't update themselves.
+      - name: Updater signing key
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [[ -n "$KEY" ]]; then
+            { echo "TAURI_SIGNING_PRIVATE_KEY<<__KEY__"; echo "$KEY"; echo "__KEY__"; echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$PASSWORD"; } >> "$GITHUB_ENV"
+          else
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY isn't set: building without auto-update files."
+            node -e "const f='src-tauri/tauri.conf.json',c=require('./'+f);c.bundle.createUpdaterArtifacts=false;require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
+          fi
+
+      - name: Build and publish the release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --target universal-apple-darwin
+          tagName: ${{ github.ref_name }}
+          releaseName: Orbit ${{ github.ref_name }}
+          releaseBody: |
+            Download the **.dmg** below (Apple Silicon and Intel, macOS 13 or later), open it and drag Orbit to Applications.
+
+            **First launch:** Orbit isn't notarized by Apple, so macOS blocks it the first time. Open Orbit once, then go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. You only need to do this once; updates install automatically after that.
+          releaseDraft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          includeUpdaterJson: true
+
+      - name: Check the app's signature
+        run: |
+          app=$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          for bin in "$app"/Contents/MacOS/*; do echo "$(basename "$bin"): $(lipo -archs "$bin")"; done

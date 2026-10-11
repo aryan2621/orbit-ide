@@ -84,7 +84,7 @@ Same UI as iOS setup: progress bar, numbered steps, auto re-check every 5 s.
 ### A7 — Release & Play Store
 - `./gradlew :app:bundleRelease` → signed `.aab`; `assembleRelease` → `.apk`.
 - Optional `bundletool build-apks --connected-device` to test the exact split APKs Play will serve.
-- Upload: Google Play Developer API with a service-account JSON (internal / closed / production track, release notes), or fastlane `supply` if installed. Same "Archive" dialog as iOS with Play-specific choices.
+- Upload: Google Play Developer API with a service-account JSON (internal / closed / open / production track), via system curl + openssl (`toolchains/android/play.rs`). Same "Archive" dialog as iOS with Play-specific choices.
 
 ### A8 — New project + quality of life
 - **New Android App** wizard: Jetpack Compose + Material 3, Kotlin DSL, version catalog (`gradle/libs.versions.toml`), min SDK picker, package name. Ships the Gradle wrapper (`gradlew`, `gradle-wrapper.jar`, `gradle-wrapper.properties`) so no global Gradle install is needed.
@@ -117,4 +117,3 @@ Same UI as iOS setup: progress bar, numbered steps, auto re-check every 5 s.
 - A3/A4: New Android App → ⌘R on a Pixel emulator → "Hello" screen, logs in Logcat; same on a USB phone.
 - A6: breakpoint in `MainActivity.onCreate` hits; variables visible.
 - A7: signed `.aab` passes `bundletool validate` and uploads to an internal testing track.
-- Rust unit tests for every parser (adb, avdmanager, Gradle diagnostics, manifest output) using recorded fixtures.

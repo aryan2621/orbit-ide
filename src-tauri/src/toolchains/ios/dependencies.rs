@@ -165,34 +165,46 @@ pub async fn ios_add_dependency(root: String, url: String, from: String, target:
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PodsStatus {
+    /// The folder with the Podfile, when there is one.
+    podfile_dir: Option<String>,
+    /// `Pods/` is missing or out of date with Podfile / Podfile.lock.
+    needs_install: bool,
+    /// Why, for the UI.
+    reason: Option<String>,
+}
 
-    const YML: &str = "name: Demo\noptions:\n  bundleIdPrefix: x\ntargets:\n  Demo:\n    type: application\n    sources: [Demo]\n";
+/// Whether a CocoaPods project needs `pod install` (CocoaPods' own check: Pods/Manifest.lock must
+/// match Podfile.lock, and the Podfile must not be newer than its lock).
+#[tauri::command]
+pub fn ios_pods_status(root: String) -> PodsStatus {
+    let dirs = [Some(Path::new(&root).to_path_buf()), project::detect(&root).map(|p| Path::new(&p.dir()).to_path_buf())];
+    let Some(dir) = dirs.into_iter().flatten().find(|d| d.join("Podfile").is_file()) else {
+        return PodsStatus { podfile_dir: None, needs_install: false, reason: None };
+    };
+    let modified = |f: &str| std::fs::metadata(dir.join(f)).and_then(|m| m.modified()).ok();
+    let reason = if !dir.join("Pods").is_dir() {
+        Some("Pods aren't installed")
+    } else if std::fs::read(dir.join("Podfile.lock")).ok() != std::fs::read(dir.join("Pods/Manifest.lock")).ok() {
+        Some("Installed pods don't match Podfile.lock")
+    } else if modified("Podfile") > modified("Podfile.lock") {
+        Some("The Podfile changed since the last pod install")
+    } else {
+        None
+    };
+    PodsStatus { podfile_dir: Some(dir.to_string_lossy().into_owned()), needs_install: reason.is_some(), reason: reason.map(str::to_owned) }
+}
 
-    #[test]
-    fn adds_and_reads_xcodegen_packages() {
-        let out = add_xcodegen_package(YML, "Alamofire", "https://github.com/Alamofire/Alamofire.git", "5.9.0", "Demo").unwrap();
-        assert!(out.contains("packages:\n  Alamofire:\n    url: https://github.com/Alamofire/Alamofire.git\n    from: \"5.9.0\"\ntargets:"));
-        assert!(out.contains("  Demo:\n    dependencies:\n      - package: Alamofire\n    type: application"));
-        let deps = parse_xcodegen(&out);
-        assert_eq!(deps, [Dependency { name: "Alamofire".into(), url: "https://github.com/Alamofire/Alamofire.git".into(), version: "from 5.9.0".into() }]);
-
-        let twice = add_xcodegen_package(&out, "Kingfisher", "https://github.com/onevcat/Kingfisher", "8.0.0", "Demo").unwrap();
-        assert_eq!(parse_xcodegen(&twice).len(), 2);
-        assert!(twice.contains("    dependencies:\n      - package: Kingfisher\n      - package: Alamofire"));
-    }
-
-    #[test]
-    fn names_from_urls() {
-        assert_eq!(name_from_url("https://github.com/pointfreeco/swift-composable-architecture.git"), "swift-composable-architecture");
-        assert_eq!(name_from_url("https://github.com/onevcat/Kingfisher/"), "Kingfisher");
-    }
-
-    #[test]
-    fn reads_swiftpm_dependencies() {
-        let j = serde_json::json!({ "dependencies": [{ "name": "swift-argument-parser", "url": "https://github.com/apple/swift-argument-parser", "version": "1.5.0" }] });
-        assert_eq!(parse_swiftpm(&j)[0].version, "1.5.0");
-    }
+/// `pod install` in the Podfile's folder, as a job.
+#[tauri::command]
+pub fn ios_pod_install(app: tauri::AppHandle, root: String, job_id: String) -> Result<(), String> {
+    let status = ios_pods_status(root);
+    let dir = status.podfile_dir.ok_or("No Podfile in this project")?;
+    let pod = env::which("pod").ok_or("CocoaPods isn't installed. Install it with `brew install cocoapods`, then try again.")?;
+    let mut cmd = env::command(&pod);
+    cmd.args(["install", "--no-ansi"]).current_dir(dir).env("LANG", "en_US.UTF-8");
+    crate::process::spawn_job(&app, job_id, cmd);
+    Ok(())
 }

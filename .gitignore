@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Built by scripts/build-llama-server.sh
+.build
+src-tauri/binaries/llama-server-*

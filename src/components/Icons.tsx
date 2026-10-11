@@ -135,10 +135,33 @@ export const IconKey = () => (
     <path d="M10.7 12.3L21 2M16 7l3 3M19 4l2 2" />
   </Svg>
 );
+export const IconPhone = () => (
+  <Svg>
+    <rect x="6" y="2" width="12" height="20" rx="2.5" />
+    <path d="M11 18h2" />
+  </Svg>
+);
 export const IconBug = () => (
   <Svg>
     <rect x="8" y="6" width="8" height="14" rx="4" />
     <path d="M12 10v10M3 13h5M16 13h5M4 7l4 2M20 7l-4 2M4 19l4-2M20 19l-4-2M9.5 6.5L8 4M14.5 6.5L16 4" />
+  </Svg>
+);
+export const IconProblems = () => (
+  <Svg>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v6M12 16.5v.5" />
+  </Svg>
+);
+export const IconOutput = () => (
+  <Svg>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M7 9h10M7 13h10M7 17h6" />
+  </Svg>
+);
+export const IconFlask = () => (
+  <Svg>
+    <path d="M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3M7.5 15h9" />
   </Svg>
 );
 export const IconContinue = () => (
@@ -250,5 +273,12 @@ export const IconUndo = () => (
   <Svg width="14" height="14">
     <path d="M9 14L4 9l5-5" />
     <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+  </Svg>
+);
+export const IconMore = () => (
+  <Svg width="14" height="14">
+    <circle cx="5" cy="12" r="1" />
+    <circle cx="12" cy="12" r="1" />
+    <circle cx="19" cy="12" r="1" />
   </Svg>
 );

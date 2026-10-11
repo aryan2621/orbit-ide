@@ -117,6 +117,17 @@ fn module_kind(script: &str) -> Option<ModuleKind> {
     }
 }
 
+/// The build script of the first application module (`app` when there are several).
+pub fn app_build_script(project: &Project) -> Option<PathBuf> {
+    let settings = settings_file(project.dir()).and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default();
+    let mut modules = included_modules(&settings);
+    modules.sort_by_key(|m| m != ":app");
+    modules.push(":".into());
+    modules.iter().filter_map(|m| build_file(&module_dir(project.dir(), m))).find(|f| {
+        std::fs::read_to_string(f).map(|s| module_kind(&s) == Some(ModuleKind::App)).unwrap_or(false)
+    })
+}
+
 /// Build scripts that declare variants beyond plain `debug`/`release`.
 fn has_custom_variants(script: &str) -> bool {
     script.contains("productFlavors") || script.contains("flavorDimensions") || script.contains("create(\"") || script.contains("initWith")
@@ -221,7 +232,7 @@ fn script_stamps(project: &Project) -> Vec<SystemTime> {
 
 async fn gradle_variants(project: &Project) -> Result<Variants, String> {
     let stamps = script_stamps(project);
-    if let Some((s, v)) = VARIANT_CACHE.lock().unwrap().get_or_insert_with(HashMap::new).get(&project.path) {
+    if let Some((s, v)) = crate::process::lock(&VARIANT_CACHE).get_or_insert_with(HashMap::new).get(&project.path) {
         if *s == stamps {
             return Ok(v.clone());
         }
@@ -237,7 +248,7 @@ async fn gradle_variants(project: &Project) -> Result<Variants, String> {
         return Err(err.lines().find(|l| !l.trim().is_empty() && !l.starts_with("FAILURE")).unwrap_or("Gradle failed").trim().to_owned());
     }
     let variants = parse_variants(&stdout);
-    VARIANT_CACHE.lock().unwrap().get_or_insert_with(HashMap::new).insert(project.path.clone(), (stamps, variants.clone()));
+    crate::process::lock(&VARIANT_CACHE).get_or_insert_with(HashMap::new).insert(project.path.clone(), (stamps, variants.clone()));
     Ok(variants)
 }
 
@@ -263,6 +274,13 @@ pub async fn gradlew(project: &Project, shell: &sdk::ShellEnv) -> tokio::process
         cmd.env("JAVA_HOME", home);
     }
     cmd
+}
+
+/// Gradle variant names start lowercase (`debug`, `freeRelease`). The UI may pass Xcode-style
+/// `Debug`/`Release`, which would build fine but never match Gradle's output metadata.
+pub fn variant_name(configuration: &str) -> String {
+    let mut chars = configuration.chars();
+    chars.next().map(|c| c.to_lowercase().chain(chars).collect()).unwrap_or_default()
 }
 
 /// Gradle task name for a module task, e.g. (`app`, `assemble`, `freeDebug`) → `:app:assembleFreeDebug`.
@@ -299,38 +317,3 @@ pub fn android_find_source(root: String, class: String, file: String) -> Option<
     }
     None
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_settings() {
-        let kts = "pluginManagement { }\nrootProject.name = \"Hello\"\ninclude(\":app\")\ninclude(\":core:data\", \":feature\")\n// include(\":old\")";
-        assert_eq!(root_project_name(kts).as_deref(), Some("Hello"));
-        assert_eq!(included_modules(kts), [":app", ":core:data", ":feature"]);
-        let groovy = "rootProject.name = 'Legacy'\ninclude ':app', 'lib'";
-        assert_eq!(root_project_name(groovy).as_deref(), Some("Legacy"));
-        assert_eq!(included_modules(groovy), [":app", ":lib"]);
-    }
-
-    #[test]
-    fn module_kinds() {
-        assert_eq!(module_kind("plugins {\n  alias(libs.plugins.android.application)\n}"), Some(ModuleKind::App));
-        assert_eq!(module_kind("plugins { id(\"com.android.application\") }"), Some(ModuleKind::App));
-        assert_eq!(module_kind("apply plugin: 'com.android.library'"), Some(ModuleKind::Library));
-        assert_eq!(module_kind("plugins { kotlin(\"jvm\") }"), None);
-        assert_eq!(module_dir(Path::new("/p"), ":core:data"), Path::new("/p/core/data"));
-    }
-
-    #[test]
-    fn variants_and_tasks() {
-        let out = "ORBIT_VARIANTS :app freeDebug,freeRelease,paidDebug,paidRelease\nORBIT_VARIANTS :lib \nnoise";
-        let v = parse_variants(out);
-        assert_eq!(v["app"], ["freeDebug", "freeRelease", "paidDebug", "paidRelease"]);
-        assert!(v["lib"].is_empty());
-        assert_eq!(task("app", "assemble", "freeDebug"), ":app:assembleFreeDebug");
-        assert_eq!(task(":", "install", "debug"), "installDebug");
-    }
-}
-

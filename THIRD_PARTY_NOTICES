@@ -1,0 +1,86 @@
+Orbit includes the following third-party software. Each component is used under the license noted;
+the full MIT and Apache 2.0 license texts follow at the end. Transitive dependencies are distributed
+under the licenses stated in their own packages (all permissive: MIT, Apache-2.0, BSD, ISC, Zlib,
+Unicode-3.0 or Unlicense).
+
+================================================================================
+Bundled binary
+================================================================================
+
+llama.cpp / ggml (llama-server), https://github.com/ggml-org/llama.cpp
+  MIT License. Copyright (c) 2023-2026 The ggml authors.
+
+================================================================================
+JavaScript
+================================================================================
+
+Monaco Editor, https://github.com/microsoft/monaco-editor
+  MIT License. Copyright (c) 2016 - present Microsoft Corporation.
+@monaco-editor/react, https://github.com/suren-atoyan/monaco-react
+  MIT License. Copyright (c) 2018 Suren Atoyan.
+xterm.js and @xterm/addon-fit, https://github.com/xtermjs/xterm.js
+  MIT License. Copyright (c) 2017-2019, The xterm.js authors; Copyright (c) 2014-2016, SourceLair
+  Private Company; Copyright (c) 2012-2013, Christopher Jeffrey.
+React and React DOM, https://github.com/facebook/react
+  MIT License. Copyright (c) Meta Platforms, Inc. and affiliates.
+Zustand, https://github.com/pmndrs/zustand
+  MIT License. Copyright (c) 2019 Paul Henschel.
+@tauri-apps/api, @tauri-apps/plugin-dialog, @tauri-apps/plugin-opener, https://github.com/tauri-apps
+  MIT License or Apache License 2.0. Copyright (c) 2017 - present Tauri Programme within The
+  Commons Conservancy.
+
+================================================================================
+Rust
+================================================================================
+
+tauri, tauri-plugin-opener, tauri-plugin-dialog, tauri-plugin-updater
+  MIT License or Apache License 2.0. Copyright (c) 2017 - present Tauri Programme within The
+  Commons Conservancy.
+tokio                      MIT License. Copyright (c) Tokio Contributors.
+serde, serde_json          MIT License or Apache License 2.0. Copyright (c) David Tolnay, Erick Tryzelaar.
+reqwest                    MIT License or Apache License 2.0. Copyright (c) Sean McArthur.
+sha2                       MIT License or Apache License 2.0. Copyright (c) RustCrypto Developers.
+regex                      MIT License or Apache License 2.0. Copyright (c) The Rust Project Developers.
+ignore                     MIT License or Unlicense. Copyright (c) Andrew Gallant.
+portable-pty               MIT License. Copyright (c) Wez Furlong.
+trash                      MIT License. Copyright (c) Artur Kovacs.
+notify-debouncer-mini      MIT License or Apache License 2.0. Copyright (c) notify-rs contributors.
+libc                       MIT License or Apache License 2.0. Copyright (c) The Rust Project Developers.
+
+================================================================================
+AI models
+================================================================================
+
+Orbit doesn't bundle any model. Models are downloaded only when you choose to, from Hugging Face,
+after their license is shown and accepted:
+
+  Qwen2.5-Coder-7B-Instruct (GGUF)   Apache License 2.0, Alibaba Cloud
+  Qwen3-8B (GGUF)                    Apache License 2.0, Alibaba Cloud
+  Qwen2.5-Coder-3B-Instruct (GGUF)   Qwen Research License Agreement (non-commercial use), Alibaba Cloud
+
+================================================================================
+MIT License
+================================================================================
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+================================================================================
+Apache License 2.0
+================================================================================
+
+The full text of the Apache License, Version 2.0 is available at
+https://www.apache.org/licenses/LICENSE-2.0. Components above offered under "MIT License or Apache
+License 2.0" are used under the MIT License.

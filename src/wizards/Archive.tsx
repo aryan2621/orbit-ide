@@ -5,6 +5,7 @@ import { useUi } from "../state/ui";
 import { useWorkspace } from "../state/workspace";
 import { loadSigning } from "../state/signing";
 import { IconClose } from "../components/Icons";
+import ReleaseChecklist, { rememberArchivedBuild } from "./ReleaseChecklist";
 
 const METHODS: { id: ArchiveMethod; title: string; detail: string }[] = [
   { id: "app-store-connect", title: "App Store Connect", detail: "For TestFlight and the App Store." },
@@ -23,7 +24,8 @@ export default function Archive() {
   const canUpload = method === "app-store-connect";
 
   const go = () => {
-    startArchive({ method, upload: canUpload && upload });
+    rememberArchivedBuild(root);
+    startArchive({ platform: "ios", method, upload: canUpload && upload });
     setShowArchive(false);
   };
 
@@ -64,6 +66,8 @@ export default function Archive() {
             </div>
           </label>
         )}
+
+        <ReleaseChecklist root={root} onLeave={() => setShowArchive(false)} />
 
         {!signing.teamId && (
           <div className="notice warning">

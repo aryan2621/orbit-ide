@@ -1,6 +1,13 @@
+pub mod avds;
 pub mod build;
+pub mod bundle;
 pub mod devices;
+pub mod lsp;
+pub mod play;
 pub mod project;
 pub mod run;
 pub mod sdk;
 pub mod setup;
+pub mod signing;
+pub mod templates;
+pub mod test;

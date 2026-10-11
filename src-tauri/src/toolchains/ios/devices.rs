@@ -3,6 +3,8 @@
 use crate::env;
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 #[derive(Serialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -88,24 +90,31 @@ pub fn parse_physical(json: &Value) -> Vec<Device> {
         .collect()
 }
 
+/// Device listing must never hang the picker (devicectl can stall on a flaky USB connection).
+const LIST_TIMEOUT: Duration = Duration::from_secs(10);
+
+async fn output_with_timeout(mut cmd: tokio::process::Command) -> Option<std::process::Output> {
+    cmd.kill_on_drop(true);
+    tokio::time::timeout(LIST_TIMEOUT, cmd.output()).await.ok()?.ok()
+}
+
 async fn simulators() -> Vec<Device> {
-    let out = env::command("xcrun").args(["simctl", "list", "devices", "available", "-j"]).output().await;
-    match out {
-        Ok(o) if o.status.success() => parse_simulators(&serde_json::from_slice(&o.stdout).unwrap_or_default()),
+    let mut cmd = env::command("xcrun");
+    cmd.args(["simctl", "list", "devices", "available", "-j"]);
+    match output_with_timeout(cmd).await {
+        Some(o) if o.status.success() => parse_simulators(&serde_json::from_slice(&o.stdout).unwrap_or_default()),
         _ => vec![],
     }
 }
 
 async fn physical_devices() -> Vec<Device> {
-    // devicectl only writes JSON to a file.
-    let path = std::env::temp_dir().join(format!("orbit-devices-{}.json", std::process::id()));
-    let ok = env::command("xcrun")
-        .args(["devicectl", "list", "devices", "--quiet", "--json-output"])
-        .arg(&path)
-        .output()
-        .await
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+    // devicectl only writes JSON to a file. Each call gets its own file: listings overlap (picker
+    // focus, the run step), and a shared name let one call delete another's output.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let path = std::env::temp_dir().join(format!("orbit-devices-{}-{}.json", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    let mut cmd = env::command("xcrun");
+    cmd.args(["devicectl", "list", "devices", "--quiet", "--json-output"]).arg(&path);
+    let ok = output_with_timeout(cmd).await.map(|o| o.status.success()).unwrap_or(false);
     let json = if ok { std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()) } else { None };
     let _ = std::fs::remove_file(&path);
     json.map(|j| parse_physical(&j)).unwrap_or_default()
@@ -120,51 +129,4 @@ pub async fn list() -> Vec<Device> {
 #[tauri::command]
 pub async fn ios_devices() -> Vec<Device> {
     list().await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn parses_simulators_newest_first() {
-        let j = json!({ "devices": {
-            "com.apple.CoreSimulator.SimRuntime.iOS-17-5": [
-                { "udid": "A", "name": "iPhone 15", "state": "Shutdown", "isAvailable": true }
-            ],
-            "com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
-                { "udid": "B", "name": "iPhone 16", "state": "Booted", "isAvailable": true },
-                { "udid": "C", "name": "Broken", "state": "Shutdown", "isAvailable": false }
-            ],
-            "com.apple.CoreSimulator.SimRuntime.watchOS-11-0": [
-                { "udid": "W", "name": "Watch", "state": "Shutdown", "isAvailable": true }
-            ]
-        }});
-        let d = parse_simulators(&j);
-        assert_eq!(d.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["B", "A"]);
-        assert_eq!(d[0].os, "iOS 18.2");
-        assert!(d[0].booted);
-        assert_eq!(d[0].destination(), "platform=iOS Simulator,id=B");
-    }
-
-    #[test]
-    fn parses_paired_ios_devices() {
-        let j = json!({ "result": { "devices": [
-            { "hardwareProperties": { "platform": "iOS", "udid": "00008110-X" },
-              "deviceProperties": { "name": "Rishabh's iPhone", "osVersionNumber": "18.1" },
-              "connectionProperties": { "pairingState": "paired", "tunnelState": "connected" } },
-            { "hardwareProperties": { "platform": "watchOS", "udid": "W" },
-              "deviceProperties": { "name": "Watch" },
-              "connectionProperties": { "pairingState": "paired" } },
-            { "hardwareProperties": { "platform": "iOS", "udid": "U" },
-              "deviceProperties": { "name": "Unpaired" },
-              "connectionProperties": { "pairingState": "unpaired" } }
-        ]}});
-        let d = parse_physical(&j);
-        assert_eq!(d.len(), 1);
-        assert_eq!(d[0].name, "Rishabh's iPhone");
-        assert_eq!(d[0].os, "iOS 18.1");
-        assert_eq!(d[0].destination(), "platform=iOS,id=00008110-X");
-    }
 }

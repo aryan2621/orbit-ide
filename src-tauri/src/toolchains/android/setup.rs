@@ -2,19 +2,30 @@
 //! Like the iOS setup, nothing is installed automatically — each step comes with a command to copy.
 
 use super::sdk::{self, MIN_JDK};
-use crate::toolchains::checks::{sh_quote, step, Check, Status};
+use crate::toolchains::checks::{sh_quote, step, Check, Item, Status};
 use std::path::Path;
 
-/// API level and build-tools suggested when none are installed.
-const API: &str = "android-36";
-const BUILD_TOOLS: &str = "36.0.0";
+/// System image suggested when none is installed. Platforms and build tools aren't suggested:
+/// once the licenses are accepted, Gradle installs whichever ones a project asks for.
+const API: &str = "android-37.0";
 
-/// Command-line tools 19.0. Google links the newest build from the Android Studio download page.
+/// JDK suggested for new installs: the newest LTS the Android Gradle plugin and Gradle 8.x/9.x all
+/// support. Anything from MIN_JDK up passes the check.
+const SUGGESTED_JDK: u32 = 21;
+
+/// Command-line tools 23.0. Google links the newest build from the Android Studio download page.
 const CMDLINE_TOOLS_URL: &str = if cfg!(target_os = "macos") {
-    "https://dl.google.com/android/repository/commandlinetools-mac-13114758_latest.zip"
+    "https://dl.google.com/android/repository/commandlinetools-mac-15641748_latest.zip"
 } else {
-    "https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip"
+    "https://dl.google.com/android/repository/commandlinetools-linux-15641748_latest.zip"
 };
+
+/// Checks that make Orbit nicer but aren't needed to build and run: they don't block "ready".
+const OPTIONAL: &[&str] = &["android-home", "language-servers", "debugger"];
+
+/// fwcd's kotlin-debug-adapter. Its last release is from 2023, but JDWP is stable and it attaches to
+/// current Android versions fine.
+const DEBUG_ADAPTER_URL: &str = "https://github.com/fwcd/kotlin-debug-adapter/releases/download/0.4.4/adapter.zip";
 
 /// The startup file the user's shell reads for new Terminal windows.
 fn shell_rc() -> &'static str {
@@ -43,7 +54,7 @@ fn status(ok: bool) -> Status {
 }
 
 #[tauri::command]
-pub async fn android_health() -> Vec<Check> {
+pub async fn android_health() -> Vec<Item> {
     let env = sdk::shell_env().await;
     let root = sdk::sdk_root(&env);
     let path = |rel: &str| sh_path(&root.join(rel));
@@ -56,15 +67,15 @@ pub async fn android_health() -> Vec<Check> {
     if let Some(java_home) = &env.java_home {
         if !jdk_ok {
             steps.push(step(
-                format!("JAVA_HOME is set to {java_home}. Install JDK {MIN_JDK} below, then change the JAVA_HOME line in {rc} to:"),
-                Some(format!("export JAVA_HOME=$(/usr/libexec/java_home -v {MIN_JDK})")),
+                format!("JAVA_HOME is set to {java_home}. Install JDK {SUGGESTED_JDK} below, then change the JAVA_HOME line in {rc} to:"),
+                Some(format!("export JAVA_HOME=$(/usr/libexec/java_home -v {SUGGESTED_JDK})")),
             ));
         }
     }
-    steps.push(step(format!("Install JDK {MIN_JDK} (Azul Zulu, free) with Homebrew:"), Some(format!("brew install --cask zulu@{MIN_JDK}"))));
+    steps.push(step(format!("Install JDK {SUGGESTED_JDK} (Azul Zulu, free, long-term support) with Homebrew:"), Some(format!("brew install --cask zulu@{SUGGESTED_JDK}"))));
     steps.push(step(
-        "No Homebrew? Download the JDK 17 installer (.dmg) from Azul, open it and follow the prompts:",
-        Some("open 'https://www.azul.com/downloads/?version=java-17-lts&os=macos&package=jdk'".into()),
+        format!("No Homebrew? Download the JDK {SUGGESTED_JDK} installer (.dmg) from Azul, open it and follow the prompts:"),
+        Some(format!("open 'https://www.azul.com/downloads/?version=java-{SUGGESTED_JDK}-lts&os=macos&package=jdk'")),
     ));
     checks.push(Check {
         id: "jdk",
@@ -116,7 +127,7 @@ pub async fn android_health() -> Vec<Check> {
         detail: match &env.android_home {
             Some(h) if home_ok => h.clone(),
             Some(h) => format!("Set to {h}, which doesn't exist"),
-            None => "Not set, so Gradle and adb in Terminal can't find the SDK".into(),
+            None => "Optional: Orbit finds the SDK itself; this lets gradle and adb in Terminal find it too".into(),
         },
         steps: vec![
             step(
@@ -146,34 +157,24 @@ pub async fn android_health() -> Vec<Check> {
     c.block_unless(tools_ready, tools_reason);
     checks.push(c);
 
-    let platforms = sdk::packages(&root.join("platforms"));
-    let build_tools = sdk::packages(&root.join("build-tools"));
+    // Only adb is needed up front; Gradle installs each project's platform and build tools itself.
     let adb = sdk::adb(&root);
-    let mut missing = Vec::new();
-    if adb.is_none() {
-        missing.push("\"platform-tools\"".to_owned());
-    }
-    if platforms.is_empty() {
-        missing.push(format!("\"platforms;{API}\""));
-    }
-    if build_tools.is_empty() {
-        missing.push(format!("\"build-tools;{BUILD_TOOLS}\""));
-    }
+    let platforms = sdk::packages(&root.join("platforms"));
     let mut c = Check {
         id: "packages",
-        label: "SDK platform and build tools",
-        status: status(missing.is_empty()),
-        detail: if missing.is_empty() {
-            format!(
-                "Platform tools {}, {}, build tools {}",
-                sdk::revision(&root.join("platform-tools")).unwrap_or_default(),
-                platforms.last().map(String::as_str).unwrap_or_default(),
-                build_tools.last().map(String::as_str).unwrap_or_default(),
-            )
-        } else {
-            format!("Missing: {}", missing.join(", ").replace('"', ""))
+        label: "SDK platform tools (adb)",
+        status: status(adb.is_some()),
+        detail: match &adb {
+            Some(_) => {
+                let version = sdk::revision(&root.join("platform-tools")).unwrap_or_default();
+                match platforms.last() {
+                    Some(p) => format!("Platform tools {version}; newest platform {p}"),
+                    None => format!("Platform tools {version}; Gradle downloads platforms as projects need them"),
+                }
+            }
+            None => "Installs and launches apps on emulators and phones".into(),
         },
-        steps: vec![step("Install them with sdkmanager:", Some(format!("{sdkmanager_sh} {}", missing.join(" "))))],
+        steps: vec![step("Install them with sdkmanager:", Some(format!("{sdkmanager_sh} \"platform-tools\"")))],
     };
     c.block_unless(tools_ready, tools_reason);
     checks.push(c);
@@ -229,6 +230,58 @@ pub async fn android_health() -> Vec<Check> {
     c.block_unless(emulator.is_some() && !images.is_empty(), "Install the emulator and a system image first");
     checks.push(c);
 
-    checks
+    let kotlin = super::lsp::find_server("kotlin");
+    let java = super::lsp::find_server("java");
+    let mut formulas = Vec::new();
+    if kotlin.is_none() {
+        formulas.push("JetBrains/utils/kotlin-lsp");
+    }
+    if java.is_none() {
+        formulas.push("jdtls");
+    }
+    let install = if kotlin.is_none() {
+        format!("brew tap JetBrains/utils && brew install {}", formulas.join(" "))
+    } else {
+        format!("brew install {}", formulas.join(" "))
+    };
+    checks.push(Check {
+        id: "language-servers",
+        label: "Kotlin and Java code intelligence",
+        status: status(formulas.is_empty()),
+        detail: if formulas.is_empty() {
+            [kotlin, java].into_iter().flatten().map(|(name, _, _)| name).collect::<Vec<_>>().join(", ")
+        } else {
+            "Completion, errors as you type and go to definition need kotlin-lsp and jdtls".into()
+        },
+        steps: vec![
+            step("Install the language servers with Homebrew:", Some(install)),
+            step(
+                "No Homebrew? Download kotlin-lsp from its releases page, unzip it, and link kotlin-lsp.sh onto your PATH as kotlin-lsp:",
+                Some("open https://github.com/Kotlin/kotlin-lsp/releases".into()),
+            ),
+        ],
+    });
+
+    let adapter = super::lsp::debug_adapter();
+    let dir = sh_path(&super::lsp::debug_adapter_dir());
+    checks.push(Check {
+        id: "debugger",
+        label: "Kotlin debugger",
+        status: status(adapter.is_some()),
+        detail: match &adapter {
+            Some((program, _)) => program.clone(),
+            None => "Breakpoints, stepping and variables need kotlin-debug-adapter".into(),
+        },
+        steps: vec![step(
+            "Download the debug adapter (it works for Kotlin and Java):",
+            Some(format!(
+                "curl -fL {DEBUG_ADAPTER_URL} -o /tmp/kda.zip && rm -rf /tmp/kda && unzip -q /tmp/kda.zip -d /tmp/kda && mkdir -p {parent} && rm -rf {dir} && mv /tmp/kda/adapter {dir}",
+                parent = sh_path(super::lsp::debug_adapter_dir().parent().unwrap_or(Path::new("/tmp"))),
+            )),
+        )],
+    });
+
+    checks.into_iter().map(|c| if OPTIONAL.contains(&c.id) { c.optional() } else { c.required() }).collect()
 }
+
 

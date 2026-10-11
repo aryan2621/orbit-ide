@@ -13,22 +13,31 @@ export class LspClient {
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private handlers = new Map<string, Handler>();
+  private requestHandlers = new Map<string, (params: any) => unknown>();
   private unlisten: UnlistenFn[] = [];
   private closed = false;
+  /** The server's `initialize` result capabilities (set by whoever initializes it). */
+  capabilities: any = {};
   onExit: () => void = () => {};
+  /** A line the server wrote to stderr. */
+  onStderr: (line: string) => void = () => {};
 
   private constructor(readonly serverId: number) {}
 
-  static async start(root: string): Promise<LspClient> {
-    const id = await invoke<number>("lsp_start", { root });
+  /** Starts sourcekit-lsp, or `server` (e.g. kotlin-lsp) when given. */
+  static async start(root: string, server?: { program: string; args: string[] }): Promise<LspClient> {
+    const id = await invoke<number>("lsp_start", { root, program: server?.program, args: server?.args });
     const client = new LspClient(id);
     client.unlisten.push(
       await listen<string>(`lsp://${id}/message`, (e) => client.receive(JSON.parse(e.payload))),
+      await listen<string>(`lsp://${id}/stderr`, (e) => client.onStderr(e.payload)),
       await listen(`lsp://${id}/exit`, () => {
         client.dispose();
         client.onExit();
       }),
     );
+    // Output is held back until we listen, so nothing (not even an immediate crash) is missed.
+    await invoke("lsp_attach", { id });
     return client;
   }
 
@@ -50,6 +59,11 @@ export class LspClient {
 
   onNotification(method: string, handler: Handler) {
     this.handlers.set(method, handler);
+  }
+
+  /** Answers server → client requests for `method` (the handler's return value is the result). */
+  onRequest(method: string, handler: (params: any) => unknown) {
+    this.requestHandlers.set(method, handler);
   }
 
   async stop() {
@@ -75,10 +89,14 @@ export class LspClient {
       if (msg.error) p.reject(new Error(msg.error.message));
       else p.resolve(msg.result);
     } else if (msg.id !== undefined) {
-      // Server → client request. We support none of the optional ones, so acknowledge with a
-      // neutral result (workspace/configuration expects one entry per requested item).
-      const result = msg.method === "workspace/configuration" ? (msg.params?.items ?? []).map(() => null) : null;
-      this.send({ jsonrpc: "2.0", id: msg.id, result }).catch(() => {});
+      // Server → client request. Unhandled ones get a neutral result (workspace/configuration
+      // expects one entry per requested item).
+      const handler = this.requestHandlers.get(msg.method);
+      const fallback = msg.method === "workspace/configuration" ? (msg.params?.items ?? []).map(() => null) : null;
+      Promise.resolve(handler ? handler(msg.params) : fallback)
+        .then((result) => this.send({ jsonrpc: "2.0", id: msg.id, result: result ?? null }))
+        .catch((e) => this.send({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: String(e) } }))
+        .catch(() => {});
     } else {
       this.handlers.get(msg.method)?.(msg.params);
     }

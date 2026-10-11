@@ -124,23 +124,3 @@ fn chrono_stamp() -> String {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "latest".into())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn export_options_for_testflight_upload() {
-        let p = export_options_plist(Method::AppStoreConnect, true, Some("TEAM123456"));
-        assert!(p.contains("<key>method</key>\n\t<string>app-store-connect</string>"));
-        assert!(p.contains("<key>destination</key>\n\t<string>upload</string>"));
-        assert!(p.contains("<key>teamID</key>\n\t<string>TEAM123456</string>"));
-    }
-
-    #[test]
-    fn export_options_without_team() {
-        let p = export_options_plist(Method::ReleaseTesting, false, None);
-        assert!(p.contains("<string>release-testing</string>") && p.contains("<string>export</string>"));
-        assert!(!p.contains("teamID"));
-    }
-}

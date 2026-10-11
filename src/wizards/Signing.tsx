@@ -29,8 +29,14 @@ export default function Signing() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   useEffect(() => {
-    if (!scheme) return;
+    setLoadError(null);
+    if (!scheme) {
+      setLoadError("Choose a scheme in the toolbar first.");
+      return;
+    }
     signingApi.info(root, scheme, configuration).then((i) => {
       setInfo(i);
       setBundleId(i.bundleId ?? "");
@@ -40,14 +46,14 @@ export default function Signing() {
         setTeamChoice(OTHER);
         setOtherTeam(team);
       }
-    });
+    }, (e) => setLoadError(`Couldn't read the project's signing settings: ${e}`));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [root, scheme, configuration]);
 
   const teamId = (teamChoice === OTHER ? otherTeam : teamChoice).trim();
   const teamValid = teamId === "" || /^[A-Z0-9]{10}$/.test(teamId);
   const keyValid = !useApiKey || (keyPath && keyId.trim() && issuerId.trim());
-  const projectChanged = !!info?.xcodegen && !!info.target && (bundleId !== (info.bundleId ?? "") || teamId !== (info.projectTeam ?? ""));
+  const projectChanged = !!info?.target && (bundleId !== (info.bundleId ?? "") || teamId !== (info.projectTeam ?? ""));
 
   const chooseKey = async () => {
     const file = await open({ multiple: false, filters: [{ name: "App Store Connect API key", extensions: ["p8"] }] });
@@ -68,7 +74,9 @@ export default function Signing() {
         apiKey: useApiKey ? { path: keyPath, keyId: keyId.trim(), issuerId: issuerId.trim() } : null,
       });
       if (projectChanged) {
-        await signingApi.save(root, info!.target!, bundleId.trim(), teamId);
+        // Choosing a team means Xcode-managed signing; keep a manual setup only when no team changed.
+        const style = teamId && teamId !== (info!.projectTeam ?? "") ? "Automatic" : null;
+        await signingApi.save(root, info!.target!, bundleId.trim(), teamId, style);
         await load(root);
       }
       setShowSigning(false);
@@ -95,7 +103,9 @@ export default function Signing() {
           </button>
         </header>
 
-        {!info ? (
+        {!info && loadError ? (
+          <div className="check-error">{loadError}</div>
+        ) : !info ? (
           <div className="setup-steps">
             <div className="setup-step skeleton" />
             <div className="setup-step skeleton" />
@@ -140,12 +150,11 @@ export default function Signing() {
                 className="text-input"
                 value={bundleId}
                 onChange={(e) => setBundleId(e.target.value.trim())}
-                readOnly={!info.xcodegen}
+                readOnly={!info.target}
               />
               <small className="muted">
-                {info.xcodegen
-                  ? "Must be unique on the App Store, e.g. com.yourname.appname. Saved to project.yml."
-                  : "Change it in the project's build settings (PRODUCT_BUNDLE_IDENTIFIER)."}
+                Must be unique on the App Store, e.g. com.yourname.appname. Saved to{" "}
+                {info.xcodegen ? "project.yml" : "the Xcode project (all configurations of the app target)"}.
               </small>
             </label>
 

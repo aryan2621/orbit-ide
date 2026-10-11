@@ -2,15 +2,18 @@
 //! what's missing. Nothing is installed automatically — each step comes with a command to copy.
 
 use crate::env;
-use crate::toolchains::checks::{sh_quote, step, Check, Status};
+use crate::toolchains::checks::{sh_quote, step, Check, Item, Status};
 use std::path::Path;
 
-/// (binary, Homebrew formula)
-const HELPER_TOOLS: &[(&str, &str)] = &[
-    ("xcbeautify", "xcbeautify"),
-    ("xcodegen", "xcodegen"),
-    ("xcode-build-server", "xcode-build-server"),
-];
+/// Oldest Xcode Orbit supports (devicectl and `-downloadPlatform` arrived in 15).
+const MIN_XCODE: u32 = 15;
+/// App Store Connect only accepts builds made with recent Xcode versions.
+const MIN_XCODE_FOR_UPLOAD: u32 = 26;
+
+/// "26.0.1" → 26
+pub fn major_version(version: &str) -> Option<u32> {
+    version.trim().split('.').next()?.parse().ok()
+}
 
 /// Official xcodes release. Its Homebrew formula has no bottle for current macOS and building it
 /// from source needs full Xcode, so the instructions download the signed binary instead.
@@ -44,9 +47,28 @@ async fn find_xcodes() -> Vec<String> {
         }
     }
     apps.retain(|a| Path::new(a).join("Contents/Developer").is_dir());
-    apps.sort();
-    apps.reverse();
-    apps
+    // Newest version first (by the app's version, not its file name: "Xcode_15.app" sorts after
+    // "Xcode.app" alphabetically even when Xcode.app is 26).
+    let mut versioned = Vec::new();
+    for app in apps {
+        let key = version_key(&xcode_version(&app).await);
+        versioned.push((key, app));
+    }
+    versioned.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    versioned.into_iter().map(|(_, app)| app).collect()
+}
+
+fn version_key(version: &str) -> Vec<u32> {
+    version.trim().split('.').filter_map(|p| p.parse().ok()).collect()
+}
+
+/// The Xcode that builds will actually use: the one `xcode-select` points at when it's a full
+/// Xcode, otherwise the newest installed.
+async fn active_xcode(installed: &[String]) -> Option<String> {
+    let (_, chosen) = developer_dir().await;
+    chosen
+        .and_then(|dir| dir.split_once(".app/").map(|(app, _)| format!("{app}.app")))
+        .or_else(|| installed.first().cloned())
 }
 
 async fn xcode_version(app: &str) -> String {
@@ -68,53 +90,21 @@ async fn developer_dir() -> (Option<String>, Option<String>) {
 }
 
 #[tauri::command]
-pub async fn ios_health() -> Vec<Check> {
+pub async fn ios_health() -> Vec<Item> {
     let mut checks = Vec::new();
 
-    let brew = env::which("brew");
-    checks.push(Check {
-        id: "homebrew",
-        label: "Homebrew",
-        status: if brew.is_some() { Status::Ok } else { Status::Missing },
-        detail: brew.clone().unwrap_or_else(|| "Package manager used to install the helper tools".into()),
-        steps: vec![
-            step(
-                "Run the official installer in Terminal. It asks for your Mac password.",
-                Some(r#"/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)""#.into()),
-            ),
-            step("Follow the \"Next steps\" it prints to add brew to your PATH, then click Re-check.", None),
-        ],
-    });
-
-    let missing: Vec<&str> =
-        HELPER_TOOLS.iter().filter(|(bin, _)| env::which(bin).is_none()).map(|(_, formula)| *formula).collect();
-    checks.push(Check {
-        id: "tools",
-        label: "Helper tools",
-        status: if missing.is_empty() {
-            Status::Ok
-        } else if brew.is_none() {
-            Status::Blocked
-        } else {
-            Status::Missing
-        },
-        detail: if missing.is_empty() {
-            HELPER_TOOLS.iter().map(|(b, _)| *b).collect::<Vec<_>>().join(", ")
-        } else if brew.is_none() {
-            "Install Homebrew first".into()
-        } else {
-            format!("Missing: {}", missing.join(", "))
-        },
-        steps: vec![step("Install them with Homebrew:", Some(format!("brew install {}", missing.join(" "))))],
-    });
-
     let installed = find_xcodes().await;
+    let active = active_xcode(&installed).await;
+    let version = match &active {
+        Some(app) => xcode_version(app).await,
+        None => String::new(),
+    };
     checks.push(Check {
         id: "xcode",
         label: "Xcode",
         status: if installed.is_empty() { Status::Missing } else { Status::Ok },
-        detail: match installed.first() {
-            Some(app) => format!("{} ({app})", xcode_version(app).await),
+        detail: match &active {
+            Some(app) => format!("{version} ({app})"),
             None => "Needed for the iOS SDK and Simulator (about 40 GB with the iOS runtime)".into(),
         },
         steps: vec![
@@ -128,6 +118,27 @@ pub async fn ios_health() -> Vec<Check> {
             ),
         ],
     });
+
+    let major = major_version(&version);
+    let mut c = Check {
+        id: "xcode-version",
+        label: "Xcode version",
+        status: if major.is_some_and(|m| m >= MIN_XCODE) { Status::Ok } else { Status::Missing },
+        detail: match major {
+            Some(m) if m < MIN_XCODE => format!("Xcode {version} is too old; Orbit needs Xcode {MIN_XCODE} or later"),
+            Some(m) if m < MIN_XCODE_FOR_UPLOAD => {
+                format!("Xcode {version} · App Store uploads need Xcode {MIN_XCODE_FOR_UPLOAD} or later")
+            }
+            Some(_) => format!("Xcode {version}"),
+            None => "Couldn't read the Xcode version".into(),
+        },
+        steps: vec![step(
+            "Update Xcode from the Mac App Store, then click Re-check:",
+            Some("open \"macappstore://apps.apple.com/app/id497799835\"".into()),
+        )],
+    };
+    c.block_unless(!installed.is_empty(), "Install Xcode first");
+    checks.push(c);
 
     let (selected, dev_dir) = developer_dir().await;
     let requires_xcode = |c: &mut Check| {
@@ -205,6 +216,48 @@ pub async fn ios_health() -> Vec<Check> {
     requires_selection(&mut c);
     checks.push(c);
 
+    let mut items: Vec<Item> = checks.into_iter().map(Check::required).collect();
+    items.extend(optional_checks().into_iter().map(Check::optional));
+    items
+}
+
+/// Conveniences: Homebrew and the tools it installs. Orbit builds and runs without them.
+fn optional_checks() -> Vec<Check> {
+    let brew = env::which("brew");
+    let mut checks = vec![Check {
+        id: "homebrew",
+        label: "Homebrew",
+        status: if brew.is_some() { Status::Ok } else { Status::Missing },
+        detail: brew.clone().unwrap_or_else(|| "Package manager for the optional tools below".into()),
+        steps: vec![
+            step(
+                "Run the official installer in Terminal. It asks for your Mac password.",
+                Some(r#"/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)""#.into()),
+            ),
+            step("Follow the \"Next steps\" it prints to add brew to your PATH, then click Re-check.", None),
+        ],
+    }];
+
+    for (id, label, bin, why) in [
+        (
+            "xcode-build-server",
+            "Code intelligence for Xcode projects",
+            "xcode-build-server",
+            "Lets Swift autocomplete understand .xcodeproj projects (Swift packages work without it)",
+        ),
+        ("xcodegen", "XcodeGen (for projects Orbit creates)", "xcodegen", "Needed for New iOS App and editing Orbit-created projects"),
+    ] {
+        let found = env::which(bin);
+        let mut c = Check {
+            id,
+            label,
+            status: if found.is_some() { Status::Ok } else { Status::Missing },
+            detail: found.unwrap_or_else(|| why.into()),
+            steps: vec![step("Install it with Homebrew:", Some(format!("brew install {bin}")))],
+        };
+        c.block_unless(brew.is_some(), "Install Homebrew first");
+        checks.push(c);
+    }
     checks
 }
 
