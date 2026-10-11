@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds a static, Metal-enabled llama-server for Apple Silicon and places it where Tauri bundles
-# sidecars: src-tauri/binaries/llama-server-{aarch64,universal}-apple-darwin.
+# sidecars: src-tauri/binaries/llama-server-{aarch64,x86_64,universal}-apple-darwin.
 #
 #   scripts/build-llama-server.sh            # pinned tag below
 #   LLAMA_TAG=b11552 scripts/build-llama-server.sh
@@ -58,5 +58,7 @@ fi
 # The universal app bundles the same arm64 binary: the AI only runs on Apple Silicon, and Intel
 # Macs hide it, so an x86_64 slice would never run. Tauri looks for this name with
 # `tauri build --target universal-apple-darwin`.
+# A universal build also compiles an x86_64 pass, which looks for its own copy.
 cp "$OUT" "$ROOT/src-tauri/binaries/llama-server-universal-apple-darwin"
+cp "$OUT" "$ROOT/src-tauri/binaries/llama-server-x86_64-apple-darwin"
 echo "Built $OUT ($LLAMA_TAG, $(du -h "$OUT" | cut -f1))"
