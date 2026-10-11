@@ -29,6 +29,15 @@ export interface Command {
   run: () => void;
 }
 
+/** Back to the welcome screen: closes the folder after asking about unsaved files. */
+export async function goHome() {
+  if (!useWorkspace.getState().root) return;
+  if (await confirmDiscardAll("Going Home closes the folder and all its files.")) {
+    useUi.getState().setShowAiPanel(false);
+    useWorkspace.getState().closeFolder();
+  }
+}
+
 export async function openFolder() {
   const dir = await open({ directory: true, multiple: false });
   if (typeof dir === "string") await switchFolder(dir);
@@ -88,6 +97,7 @@ export function getCommands(): Command[] {
     aiReady() && hasRoot && useProject.getState().build.status === "failed" && { id: "ai-fix-build", title: "AI: Fix Build Failure", run: fixBuild },
     aiAvailable() && useAi.getState().server.status !== "stopped" && { id: "ai-unload", title: "AI: Unload Model (free memory)", run: () => aiApi.unload() },
     { id: "ai-settings", title: "AI: Settings…", run: () => (ui.setSettingsPage("ai"), ui.setShowSettings(true)) },
+    hasRoot && { id: "go-home", title: "Go to Home (close folder)", shortcut: "⇧⌘H", run: () => goHome() },
     { id: "check-updates", title: "Orbit: Check for Updates", run: () => checkForUpdates(true) },
     { id: "open-logs", title: "Help: Open Logs", run: () => openLogs() },
     { id: "report-problem", title: "Help: Report a Problem", run: () => reportProblem() },

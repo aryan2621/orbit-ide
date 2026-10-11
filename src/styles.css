@@ -3672,3 +3672,4 @@ textarea.text-input { height: auto; padding: 8px 10px; line-height: 1.5; resize:
 .setup .notice.error { background: var(--danger-soft); color: var(--danger); }
 .setup .notice.error::before { content: "!"; background: var(--danger); }
 .setup .setup-hint { font-size: 12px; color: var(--text-muted); }
+.toolbar-home { margin-right: 2px; }

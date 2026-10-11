@@ -23,6 +23,7 @@ const EDITOR: [string, string][] = [
 
 const APP: [string, string][] = [
   ["Command Palette", "⇧⌘P"],
+  ["Go to Home (close folder)", "⇧⌘H"],
   ["Quick Open File", "⌘P"],
   ["Go to Symbol in File", "⇧⌘O"],
   ["Workspace Symbols", "⌘T"],

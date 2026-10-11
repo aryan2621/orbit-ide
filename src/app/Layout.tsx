@@ -43,7 +43,7 @@ import AiPanel from "../ai/AiPanel";
 import { EditSelectionHost } from "../ai/EditSelection";
 import CommandPalette from "../palette/CommandPalette";
 import { goBack, goForward } from "../editor/navigation";
-import { openFolder } from "../palette/commands";
+import { goHome, openFolder } from "../palette/commands";
 import BuildControls from "../toolbar/BuildControls";
 import ActivityBar from "./ActivityBar";
 import StatusBar from "./StatusBar";
@@ -51,7 +51,7 @@ import Resizer from "../components/Resizer";
 import { ContextMenuHost } from "../components/ContextMenu";
 import { PromptHost } from "../components/Prompt";
 import { TooltipHost } from "../components/Tooltip";
-import { IconClose, IconCommand, IconPanelBottom } from "../components/Icons";
+import { IconClose, IconCommand, IconHome, IconPanelBottom } from "../components/Icons";
 
 const isMac = navigator.userAgent.includes("Mac");
 const TABS: { id: BottomTab; label: string }[] = [
@@ -134,6 +134,7 @@ export default function Layout() {
             f: () => s.setActivity("search"),
             e: () => s.setActivity("explorer"),
             d: () => useWorkspace.getState().root && s.showActivity("debug"),
+            h: () => goHome(),
           }
         : e.altKey
           ? { s: () => useWorkspace.getState().saveAll() }
@@ -230,6 +231,11 @@ export default function Layout() {
   return (
     <div className={`app${isMac ? " mac" : ""}`}>
       <header className="toolbar" data-tauri-drag-region>
+        {root && (
+          <button className="icon-btn toolbar-home" title="Home: close this folder (⇧⌘H)" onClick={goHome}>
+            <IconHome />
+          </button>
+        )}
         <BuildControls />
         <span className="toolbar-title" data-tauri-drag-region>
           {root ? root.split("/").pop() : "Orbit"}

@@ -88,6 +88,8 @@ interface WorkspaceState {
   refreshFolders: (folders: string[]) => void;
   cursor: { line: number; column: number } | null;
   setRoot: (root: string) => void;
+  /** Closes the folder and returns to the welcome screen (callers confirm unsaved changes first). */
+  closeFolder: () => void;
   refreshTree: () => void;
   setCursor: (cursor: { line: number; column: number } | null) => void;
   /** Updates open tabs after a file or folder on disk was renamed or deleted. */
@@ -185,6 +187,14 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     savedVersions.clear();
     savedTexts.clear();
     set({ root, files: [], activePath: null, groups: [{ paths: [], active: null }], focused: 0, recent, cursor: null });
+  },
+
+  closeFolder: () => {
+    if (!get().root) return;
+    monaco.editor.getModels().filter((m) => m.uri.scheme === "file").forEach((m) => m.dispose());
+    savedVersions.clear();
+    savedTexts.clear();
+    set({ root: null, files: [], activePath: null, groups: [{ paths: [], active: null }], focused: 0, cursor: null });
   },
 
   refreshTree: () => set((s) => ({ treeVersion: s.treeVersion + 1 })),

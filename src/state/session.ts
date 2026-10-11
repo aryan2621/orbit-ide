@@ -72,6 +72,7 @@ useWorkspace.subscribe((s, prev) => {
     // for next time, but not the edits.
     if (prev.root) write(sessionKey(prev.root), { tabs: prev.files.map((f) => f.path), active: prev.activePath, backups: {} } satisfies Session);
     if (s.root) restore(s.root);
+    else write(LAST_ROOT_KEY, null); // went Home: start there next time too
     return;
   }
   scheduleBackup();

@@ -312,3 +312,8 @@ export const IconPalette = () => (
     <circle cx="14.5" cy="7" r="1" />
   </Svg>
 );
+export const IconHome = () => (
+  <Svg>
+    <path d="M3.5 10.5L12 3.5l8.5 7M5.5 9v10.5h4.5v-6h4v6h4.5V9" />
+  </Svg>
+);
