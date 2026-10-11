@@ -371,6 +371,20 @@ async fn bonjour_resolve(name: &str, service: &str) -> Option<String> {
     Some(addr.to_string())
 }
 
+/// Disconnects a phone connected over Wi-Fi (its adb serial: `ip:port` or the mDNS name). The phone
+/// stays paired; "Forget" on its Wireless debugging screen removes the pairing.
+#[tauri::command]
+pub async fn android_disconnect(serial: String) -> Result<(), String> {
+    let adb_bin = adb_path().await.ok_or("adb isn't installed (Setup → Android)")?;
+    let out = adb(&adb_bin, None).args(["disconnect", &serial]).output().await.map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if out.status.success() && !text.contains("error") {
+        Ok(())
+    } else {
+        Err(if text.is_empty() { String::from_utf8_lossy(&out.stderr).trim().to_owned() } else { text })
+    }
+}
+
 /// Connects to a paired phone over Wi-Fi (`host:port` from the Wireless debugging screen).
 #[tauri::command]
 pub async fn android_connect(host: String) -> Result<String, String> {

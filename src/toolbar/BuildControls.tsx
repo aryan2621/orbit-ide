@@ -4,7 +4,7 @@ import { useWorkspace } from "../state/workspace";
 import { useUi } from "../state/ui";
 import { IconArchive, IconBug, IconHammer, IconKey, IconMonitor, IconPhone, IconPlay, IconStopSquare } from "../components/Icons";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { androidApi } from "../lib/ipc";
+import { androidApi, isWirelessSerial } from "../lib/ipc";
 import { aiAvailable, useAi } from "../state/ai";
 import { fixBuild } from "../ai/actions";
 
@@ -186,6 +186,7 @@ export default function BuildControls() {
             {physical.map((d) => (
               <option key={d.id} value={d.id}>
                 {deviceLabel(d.name, d.os)}
+                {android ? (isWirelessSerial(d.id) ? " · Wi-Fi" : " · USB") : ""}
                 {d.booted ? "" : " (not ready)"}
               </option>
             ))}

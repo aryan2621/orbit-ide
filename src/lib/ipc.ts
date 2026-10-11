@@ -310,6 +310,9 @@ export const generateAppIcons = (root: string, source: string, background: strin
 export const regenerateProject = (root: string) => invoke<boolean>("ios_regenerate", { root });
 
 /** Android toolchain (Gradle, adb, emulator); same shapes as the iOS commands. */
+/** An Android device connected over Wi-Fi (adb serial `ip:port` or an mDNS service name) rather than USB. */
+export const isWirelessSerial = (id: string) => /:\d+$/.test(id) || id.includes("._adb-tls-connect.");
+
 export const androidApi = {
   platform: (root: string) => invoke<"android" | "ios" | null>("project_platform", { root }),
   projectInfo: (root: string) => invoke<ProjectInfo>("android_project_info", { root }),
@@ -328,6 +331,7 @@ export const androidApi = {
   ) => invoke<void>("android_archive", { root, scheme, configuration: variant, format, upload, jobId }),
   pair: (host: string, code: string) => invoke<string>("android_pair", { host, code }),
   connect: (host: string) => invoke<string>("android_connect", { host }),
+  disconnect: (serial: string) => invoke<void>("android_disconnect", { serial }),
   mdnsServices: () => invoke<{ name: string; service: string; host: string }[]>("android_mdns_services"),
   stopEmulator: (serial: string) => invoke<void>("android_emulator_stop", { serial }),
 };

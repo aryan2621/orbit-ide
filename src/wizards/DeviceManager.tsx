@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { Choice, Device, deviceManagerApi } from "../lib/ipc";
+import { Choice, Device, androidApi, deviceManagerApi, isWirelessSerial } from "../lib/ipc";
 import { useProject } from "../state/project";
 import { useSetup } from "../state/setup";
 import { useUi } from "../state/ui";
@@ -27,6 +27,20 @@ export default function DeviceManager({ onClose }: { onClose: () => void }) {
   }, [loadDevices]);
 
   const virtual = devices.filter((d) => (platform === "android" ? d.kind === "emulator" : d.kind === "simulator"));
+  const phones = platform === "android" ? devices.filter((d) => d.kind === "device") : [];
+
+  const disconnect = async (d: Device) => {
+    setBusy(`${d.id}:disconnect`);
+    setError(null);
+    try {
+      await androidApi.disconnect(d.id);
+      await loadDevices();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const act = async (d: Device, action: string, confirm?: string) => {
     if (confirm && !(await ask(confirm, { title: d.name, kind: "warning" }))) return;
@@ -54,8 +68,8 @@ export default function DeviceManager({ onClose }: { onClose: () => void }) {
       <div className="setup settings">
         <header className="setup-header">
           <div>
-            <h1>{platform === "android" ? "Emulators" : "Simulators"}</h1>
-            <p className="muted">Create and manage virtual devices to run your app on.</p>
+            <h1>{platform === "android" ? "Devices" : "Simulators"}</h1>
+            <p className="muted">{platform === "android" ? "Emulators and connected phones to run your app on." : "Create and manage virtual devices to run your app on."}</p>
           </div>
           <button className="icon-btn" title="Close" onClick={onClose}>
             <IconClose />
@@ -63,6 +77,7 @@ export default function DeviceManager({ onClose }: { onClose: () => void }) {
         </header>
 
         <section className="settings-section">
+          {platform === "android" && <h2>Emulators</h2>}
           {virtual.length === 0 && <p className="muted">No {platform === "android" ? "emulators" : "Simulators"} yet. Create one below.</p>}
           {virtual.map((d) => (
             <div className="setting-row" key={d.id}>
@@ -86,6 +101,33 @@ export default function DeviceManager({ onClose }: { onClose: () => void }) {
             </div>
           ))}
         </section>
+
+        {phones.length > 0 && (
+          <section className="settings-section">
+            <h2>Phones</h2>
+            {phones.map((d) => {
+              const wireless = isWirelessSerial(d.id);
+              return (
+                <div className="setting-row" key={d.id}>
+                  <div>
+                    <div>
+                      {d.name} <span className="pill">{wireless ? "Wi-Fi" : "USB"}</span>
+                    </div>
+                    <small className="muted">
+                      {d.os ? `${d.os} · ` : ""}
+                      {wireless ? "Stays paired after disconnecting; tap Forget on the phone's Wireless debugging screen to unpair." : "Unplug the cable to remove it."}
+                    </small>
+                  </div>
+                  {wireless && (
+                    <button className="btn" disabled={busy !== null} onClick={() => disconnect(d)}>
+                      {busy === `${d.id}:disconnect` ? "…" : "Disconnect"}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </section>
+        )}
 
         {(projectPlatform === "ios" || projectPlatform === "android") && <DeviceTools platform={platform} />}
 

@@ -101,6 +101,7 @@ pub fn run() {
             toolchains::android::devices::android_devices,
             toolchains::android::devices::android_pair,
             toolchains::android::devices::android_connect,
+            toolchains::android::devices::android_disconnect,
             toolchains::android::devices::android_mdns_services,
             toolchains::android::devices::android_emulator_stop,
             toolchains::android::avds::android_avd_options,
