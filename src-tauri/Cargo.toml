@@ -1,6 +1,6 @@
 [package]
 name = "orbit-ide"
-version = "1.0.0"
+version = "1.0.1"
 description = "Orbit: an IDE for building iOS and Android apps"
 authors = ["Rishabh Verma"]
 edition = "2021"

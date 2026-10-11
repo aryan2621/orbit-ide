@@ -38,6 +38,16 @@ const unfence = (s: string) => {
   return m ? m[1] : s.replace(/^\n+|\s+$/g, "");
 };
 
+/** Models often drop the fragment's leading indentation; put the original indent back on the first
+ * line (and on following lines when every line lost it). */
+function keepIndent(original: string, result: string) {
+  const indent = /^[ \t]*/.exec(original)?.[0] ?? "";
+  if (!indent || result.startsWith(indent) || /^[ \t]/.test(result)) return result;
+  const lines = result.split("\n");
+  const allFlush = lines.slice(1).every((l) => !l || !/^[ \t]/.test(l));
+  return lines.map((l, i) => (i === 0 || (allFlush && l) ? indent + l : l)).join("\n");
+}
+
 export async function editSelectionWithAi() {
   const editor = activeEditor();
   const model = editor?.getModel();
@@ -71,7 +81,7 @@ Instruction: ${instruction}`;
   try {
     const reply = await oneShot(SYSTEM, user, abort.signal);
     if (useEdit.getState().edit !== edit) return;
-    useEdit.setState({ edit: { ...edit, result: unfence(reply) } });
+    useEdit.setState({ edit: { ...edit, result: keepIndent(original, unfence(reply)) } });
   } catch (e) {
     if (useEdit.getState().edit === edit) useEdit.setState({ edit: null });
     if (!abort?.signal.aborted) toast(parseAiError(e).message, "error");
