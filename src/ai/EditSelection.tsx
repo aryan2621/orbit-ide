@@ -47,6 +47,9 @@ export async function editSelectionWithAi() {
   if (!selection) return;
   // No selection: the current line.
   if (selection.isEmpty()) selection = new monaco.Selection(selection.startLineNumber, 1, selection.startLineNumber, model.getLineMaxColumn(selection.startLineNumber));
+  // Whole-line selections (⌘L, triple-click) end at column 1 of the next line: keep that line break out of it.
+  if (selection.endColumn === 1 && selection.endLineNumber > selection.startLineNumber)
+    selection = new monaco.Selection(selection.startLineNumber, selection.startColumn, selection.endLineNumber - 1, model.getLineMaxColumn(selection.endLineNumber - 1));
   const range = { startLineNumber: selection.startLineNumber, startColumn: selection.startColumn, endLineNumber: selection.endLineNumber, endColumn: selection.endColumn };
   const original = model.getValueInRange(range);
   const instruction = await promptText("Edit with AI", { placeholder: "e.g. add error handling, convert to async/await", detail: `${selection.endLineNumber - selection.startLineNumber + 1} line(s) of ${path.split("/").pop()}` });
@@ -146,7 +149,7 @@ export function EditSelectionHost({ theme }: { theme: "light" | "dark" }) {
             modifiedModelPath={`orbit-ai:/after/${edit.version}/${name}`}
             theme={theme === "dark" ? "orbit-dark" : "orbit-light"}
             onMount={(e) => (diff.current = e)}
-            options={{ renderSideBySide: true, originalEditable: false, minimap: { enabled: false }, fontSize: 12.5, automaticLayout: true }}
+            options={{ renderSideBySide: true, originalEditable: false, minimap: { enabled: false }, fontSize: 13, automaticLayout: true, wordWrap: "on", diffWordWrap: "on", renderOverviewRuler: false, scrollBeyondLastLine: false }}
           />
         )}
       </div>
