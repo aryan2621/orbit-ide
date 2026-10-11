@@ -1,39 +1,49 @@
-import { useEffect, useState } from "react";
+import { MouseEvent, useEffect, useState } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { Choice, Device, androidApi, deviceManagerApi, isWirelessSerial } from "../lib/ipc";
 import { useProject } from "../state/project";
 import { useSetup } from "../state/setup";
 import { useUi } from "../state/ui";
-import { IconClose } from "../components/Icons";
+import { openContextMenu } from "../components/ContextMenu";
+import { IconClose, IconMonitor, IconMore, IconPhone, IconPlus, IconRefresh } from "../components/Icons";
 import DeviceTools from "./DeviceTools";
 
 type Platform = "ios" | "android";
+type Tab = "phones" | "virtual" | "tools";
 
-/** Create, start, stop, wipe and delete Simulators (iOS) and emulators (Android). */
+/** Phones, emulators / Simulators and app tools, in one dialog. */
 export default function DeviceManager({ onClose }: { onClose: () => void }) {
   const projectPlatform = useProject((s) => s.info?.platform);
   const setupPlatform = useSetup((s) => s.platform);
   const platform: Platform = projectPlatform === "android" ? "android" : projectPlatform === "ios" ? "ios" : setupPlatform;
-  const { devices, loadDevices } = useProject();
+  const { devices, deviceId, setDevice, loadDevices } = useProject();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const virtualLabel = platform === "android" ? "Emulators" : "Simulators";
+  const virtual = devices.filter((d) => (platform === "android" ? d.kind === "emulator" : d.kind === "simulator"));
+  const phones = devices.filter((d) => d.kind === "device");
+  const hasProject = projectPlatform === "ios" || projectPlatform === "android";
+  const [tab, setTab] = useState<Tab>(() => (phones.length > 0 && platform === "android" ? "phones" : "virtual"));
 
   useEffect(() => {
     loadDevices();
     // Emulators boot in the background; keep the list fresh while the dialog is open.
     const timer = setInterval(() => loadDevices(), 4000);
-    return () => clearInterval(timer);
-  }, [loadDevices]);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [loadDevices, onClose]);
 
-  const virtual = devices.filter((d) => (platform === "android" ? d.kind === "emulator" : d.kind === "simulator"));
-  const phones = platform === "android" ? devices.filter((d) => d.kind === "device") : [];
-
-  const disconnect = async (d: Device) => {
-    setBusy(`${d.id}:disconnect`);
+  const guard = async (key: string, fn: () => Promise<unknown>) => {
+    setBusy(key);
     setError(null);
     try {
-      await androidApi.disconnect(d.id);
+      await fn();
       await loadDevices();
     } catch (e) {
       setError(String(e));
@@ -44,127 +54,215 @@ export default function DeviceManager({ onClose }: { onClose: () => void }) {
 
   const act = async (d: Device, action: string, confirm?: string) => {
     if (confirm && !(await ask(confirm, { title: d.name, kind: "warning" }))) return;
-    setBusy(`${d.id}:${action}`);
-    setError(null);
-    try {
-      if (platform === "android") await deviceManagerApi.avdAction(d.avd ?? d.name.replace(/ /g, "_"), action as never);
-      else await deviceManagerApi.simulatorAction(d.id, action as never);
-      await loadDevices();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(null);
-    }
+    guard(`${d.id}:${action}`, () =>
+      platform === "android" ? deviceManagerApi.avdAction(d.avd ?? d.name.replace(/ /g, "_"), action as never) : deviceManagerApi.simulatorAction(d.id, action as never),
+    );
   };
 
-  const button = (d: Device, action: string, label: string, confirm?: string) => (
-    <button className="btn" disabled={busy !== null} onClick={() => act(d, action, confirm)}>
-      {busy === `${d.id}:${action}` ? "…" : label}
-    </button>
-  );
+  const refresh = async () => {
+    setRefreshing(true);
+    await loadDevices();
+    setRefreshing(false);
+  };
+
+  const moreMenu = (e: MouseEvent, d: Device) =>
+    openContextMenu(e, [
+      platform === "android" && !d.booted && { label: "Cold Boot", onSelect: () => act(d, "coldboot") },
+      { label: "Wipe Data…", onSelect: () => act(d, platform === "android" ? "wipe" : "erase", "Erase all apps, data and settings on this device?") },
+      null,
+      { label: "Delete…", danger: true, onSelect: () => act(d, "delete", "Delete this device? This can't be undone.") },
+    ]);
+
+  const useButton = (d: Device) =>
+    d.id === deviceId ? (
+      <span className="pill on" title="The toolbar's run destination">
+        Selected
+      </span>
+    ) : (
+      <button className="btn subtle" title="Make this the run destination in the toolbar" onClick={() => setDevice(d.id)}>
+        Use
+      </button>
+    );
+
+  const status = (d: Device) => (d.booted ? "on" : d.name.includes("(") ? "warn" : "off");
 
   return (
-    <div className="overlay" role="dialog" aria-modal="true" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="setup settings">
-        <header className="setup-header">
+    <div className="overlay" role="dialog" aria-modal="true" aria-label="Devices" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="devices-window">
+        <header className="devices-header">
           <div>
-            <h1>{platform === "android" ? "Devices" : "Simulators"}</h1>
-            <p className="muted">{platform === "android" ? "Emulators and connected phones to run your app on." : "Create and manage virtual devices to run your app on."}</p>
+            <h1>Devices</h1>
+            <p className="muted">Where your app runs: {platform === "android" ? "phones and emulators" : "Simulators and iPhones"}.</p>
           </div>
-          <button className="icon-btn" title="Close" onClick={onClose}>
+          <span className="grow" />
+          <button className="icon-btn" title="Refresh the list" onClick={refresh} disabled={refreshing}>
+            <IconRefresh />
+          </button>
+          <button className="icon-btn" title="Close (Esc)" onClick={onClose}>
             <IconClose />
           </button>
         </header>
 
-        <section className="settings-section">
-          {platform === "android" && <h2>Emulators</h2>}
-          {virtual.length === 0 && <p className="muted">No {platform === "android" ? "emulators" : "Simulators"} yet. Create one below.</p>}
-          {virtual.map((d) => (
-            <div className="setting-row" key={d.id}>
-              <div>
-                <div>
-                  {d.name} {d.booted && <span className="muted">● running</span>}
-                </div>
-                <small className="muted">{d.os}</small>
-              </div>
-              <div className="row-actions">
-                {d.booted ? button(d, platform === "android" ? "stop" : "shutdown", "Shut down") : button(d, platform === "android" ? "start" : "boot", "Start")}
-                {platform === "android" && !d.booted && button(d, "coldboot", "Cold boot")}
-                {button(
-                  d,
-                  platform === "android" ? "wipe" : "erase",
-                  "Wipe data",
-                  "Erase all apps, data and settings on this device?",
-                )}
-                {button(d, "delete", "Delete", "Delete this device? This can't be undone.")}
-              </div>
-            </div>
+        <div className="devices-tabs" role="tablist">
+          {(
+            [
+              ["phones", platform === "android" ? "Phones" : "iPhones", phones.length],
+              ["virtual", virtualLabel, virtual.length],
+              ...(hasProject ? [["tools", "App tools", null]] : []),
+            ] as [Tab, string, number | null][]
+          ).map(([id, label, count]) => (
+            <button key={id} role="tab" aria-selected={tab === id} className={`devices-tab${tab === id ? " active" : ""}`} onClick={() => setTab(id)}>
+              {label}
+              {count !== null && <span className="devices-count">{count}</span>}
+            </button>
           ))}
-        </section>
+        </div>
 
-        {phones.length > 0 && (
-          <section className="settings-section">
-            <h2>Phones</h2>
-            {phones.map((d) => {
-              const wireless = isWirelessSerial(d.id);
-              return (
-                <div className="setting-row" key={d.id}>
-                  <div>
-                    <div>
-                      {d.name} <span className="pill">{wireless ? "Wi-Fi" : "USB"}</span>
-                    </div>
-                    <small className="muted">
-                      {d.os ? `${d.os} · ` : ""}
-                      {wireless ? "Stays paired after disconnecting; tap Forget on the phone's Wireless debugging screen to unpair." : "Unplug the cable to remove it."}
-                    </small>
-                  </div>
-                  {wireless && (
-                    <button className="btn" disabled={busy !== null} onClick={() => disconnect(d)}>
-                      {busy === `${d.id}:disconnect` ? "…" : "Disconnect"}
-                    </button>
-                  )}
+        <div className="devices-body">
+          {error && <div className="check-error">{error}</div>}
+
+          {tab === "phones" &&
+            (phones.length === 0 ? (
+              <div className="devices-empty">
+                <IconPhone />
+                <strong>No {platform === "android" ? "phones" : "iPhones"} connected</strong>
+                <p className="muted">
+                  {platform === "android"
+                    ? "Plug one in with USB debugging on (Settings → Developer options) and tap Allow on the phone, or pair over Wi-Fi."
+                    : "Connect an iPhone with a cable, unlock it and tap Trust. Turn on Developer Mode in Settings → Privacy & Security."}
+                </p>
+                {platform === "android" && (
+                  <button className="btn primary" onClick={() => useUi.getState().setShowWirelessPair(true)}>
+                    Pair over Wi-Fi…
+                  </button>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="device-list">
+                  {phones.map((d) => {
+                    const wireless = platform === "android" && isWirelessSerial(d.id);
+                    return (
+                      <div className="device-row" key={d.id}>
+                        <span className="device-icon">
+                          <IconPhone />
+                        </span>
+                        <div className="device-info">
+                          <div className="device-name">
+                            <span className={`device-dot ${status(d)}`} />
+                            {d.name}
+                          </div>
+                          <small className="muted">
+                            {[d.os, platform === "android" ? (wireless ? "Wi-Fi" : "USB") : null].filter(Boolean).join(" · ")}
+                          </small>
+                        </div>
+                        <div className="device-actions">
+                          {d.booted && useButton(d)}
+                          {wireless && (
+                            <button
+                              className="btn"
+                              title="Disconnect; the phone stays paired (tap Forget on the phone to unpair)"
+                              disabled={busy !== null}
+                              onClick={() => guard(`${d.id}:disconnect`, () => androidApi.disconnect(d.id))}
+                            >
+                              {busy === `${d.id}:disconnect` ? "…" : "Disconnect"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
-          </section>
-        )}
+                {platform === "android" && (
+                  <div className="devices-foot">
+                    <span className="muted small">USB phones disconnect when unplugged.</span>
+                    <span className="grow" />
+                    <button className="btn" onClick={() => useUi.getState().setShowWirelessPair(true)}>
+                      Pair over Wi-Fi…
+                    </button>
+                  </div>
+                )}
+              </>
+            ))}
 
-        {(projectPlatform === "ios" || projectPlatform === "android") && <DeviceTools platform={platform} />}
-
-        {creating ? (
-          <CreateForm
-            platform={platform}
-            onDone={async () => {
-              setCreating(false);
-              await loadDevices();
-            }}
-          />
-        ) : null}
-
-        {error && <div className="check-error">{error}</div>}
-
-        <footer className="setup-footer">
-          {!creating && (
-            <button className="btn" onClick={() => setCreating(true)}>
-              New {platform === "android" ? "emulator" : "Simulator"}…
-            </button>
+          {tab === "virtual" && (
+            <>
+              {creating && (
+                <CreateForm
+                  platform={platform}
+                  onCancel={() => setCreating(false)}
+                  onDone={async () => {
+                    setCreating(false);
+                    await loadDevices();
+                  }}
+                />
+              )}
+              {virtual.length === 0 && !creating ? (
+                <div className="devices-empty">
+                  <IconMonitor />
+                  <strong>No {virtualLabel.toLowerCase()} yet</strong>
+                  <p className="muted">Create a virtual {platform === "android" ? "Android device" : "iPhone or iPad"} to run your app without hardware.</p>
+                  <button className="btn primary" onClick={() => setCreating(true)}>
+                    New {platform === "android" ? "emulator" : "Simulator"}…
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="device-list">
+                    {virtual.map((d) => {
+                      const starting = busy === `${d.id}:start` || busy === `${d.id}:boot` || busy === `${d.id}:coldboot`;
+                      return (
+                        <div className="device-row" key={d.id}>
+                          <span className="device-icon">
+                            <IconMonitor />
+                          </span>
+                          <div className="device-info">
+                            <div className="device-name">
+                              <span className={`device-dot ${starting ? "warn" : status(d)}`} />
+                              {d.name}
+                            </div>
+                            <small className="muted">{[d.os, d.booted ? "Running" : starting ? "Starting…" : "Off"].filter(Boolean).join(" · ")}</small>
+                          </div>
+                          <div className="device-actions">
+                            {d.booted && useButton(d)}
+                            {d.booted ? (
+                              <button className="btn" disabled={busy !== null} onClick={() => act(d, platform === "android" ? "stop" : "shutdown")}>
+                                {busy?.startsWith(`${d.id}:`) ? "…" : "Shut Down"}
+                              </button>
+                            ) : (
+                              <button className="btn primary" disabled={busy !== null} onClick={() => act(d, platform === "android" ? "start" : "boot")}>
+                                {starting ? "Starting…" : "Start"}
+                              </button>
+                            )}
+                            <button className="icon-btn" title="More actions" disabled={busy !== null} onClick={(e) => moreMenu(e, d)}>
+                              <IconMore />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {!creating && (
+                    <div className="devices-foot">
+                      <span className="grow" />
+                      <button className="btn" onClick={() => setCreating(true)}>
+                        <IconPlus /> New {platform === "android" ? "emulator" : "Simulator"}…
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
           )}
-          {platform === "android" && (
-            <button className="btn" onClick={() => useUi.getState().setShowWirelessPair(true)}>
-              Pair phone over Wi-Fi…
-            </button>
-          )}
-          <span className="grow" />
-          <button className="btn primary" onClick={onClose}>
-            Done
-          </button>
-        </footer>
+
+          {tab === "tools" && hasProject && <DeviceTools platform={platform} />}
+        </div>
       </div>
     </div>
   );
 }
 
-function CreateForm({ platform, onDone }: { platform: Platform; onDone: () => void }) {
+function CreateForm({ platform, onDone, onCancel }: { platform: Platform; onDone: () => void; onCancel: () => void }) {
   const [models, setModels] = useState<Choice[] | null>(null);
   const [systems, setSystems] = useState<Choice[]>([]);
   const [model, setModel] = useState("");
@@ -207,11 +305,11 @@ function CreateForm({ platform, onDone }: { platform: Platform; onDone: () => vo
     }
   };
 
-  if (models === null) return <div className="setup-step skeleton" />;
+  if (models === null) return <div className="device-create skeleton-block" />;
   const noSystems = systems.length === 0;
   return (
-    <section className="settings-section">
-      <h2>New {platform === "android" ? "emulator" : "Simulator"}</h2>
+    <section className="device-create">
+      <h3>New {platform === "android" ? "emulator" : "Simulator"}</h3>
       <label className="field">
         <span>Device</span>
         <select
@@ -248,6 +346,9 @@ function CreateForm({ platform, onDone }: { platform: Platform; onDone: () => vo
       </label>
       {error && <div className="check-error">{error}</div>}
       <div className="row-actions">
+        <button className="btn" disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
         <button className="btn primary" disabled={busy || noSystems || !model || !name.trim()} onClick={create}>
           {busy ? "Creating…" : "Create"}
         </button>
