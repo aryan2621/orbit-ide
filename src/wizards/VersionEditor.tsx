@@ -77,7 +77,7 @@ export default function VersionEditor({ root, onClose }: { root: string; onClose
             </label>
             <label className="field">
               <span>Build {android ? "(versionCode)" : "(CURRENT_PROJECT_VERSION)"}</span>
-              <div className="row-actions">
+              <div className="row gap">
                 <input
                   className="text-input"
                   placeholder="1"

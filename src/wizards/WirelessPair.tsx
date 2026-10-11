@@ -98,18 +98,20 @@ function QrPairing({ onConnected }: { onConnected: () => void }) {
       <div className="pair-qr-side">
         <ol className="pair-steps">
           <li>On the phone, open Settings → Developer options → Wireless debugging and turn it on.</li>
-          <li>Tap “Pair device with QR code” and scan this code.</li>
+          <li>Tap “Pair device with QR code” and scan this code with the scanner that opens (the camera app won't work).</li>
         </ol>
         <div className={`pair-status ${state.phase}`}>
           {(state.phase === "waiting" || state.phase === "pairing" || state.phase === "connecting") && <span className="spinner" />}
           <span>{status}</span>
         </div>
         {(state.phase === "expired" || state.phase === "error" || state.phase === "done") && (
-          <button className="btn" title="Show a new pairing code" onClick={() => setAttempt((a) => a + 1)}>
+          <button className="btn" onClick={() => setAttempt((a) => a + 1)}>
             <IconRefresh /> {state.phase === "done" ? "Pair another phone" : "New code"}
           </button>
         )}
-        <p className="muted small">The phone and this Mac must be on the same Wi-Fi network. Android 11 or later.</p>
+        <p className="muted small">
+          The phone and this Mac must be on the same network (Android 11 or later). With a USB cable you don't need to pair: turn on USB debugging, plug in and tap Allow.
+        </p>
       </div>
     </div>
   );
@@ -194,7 +196,7 @@ export default function WirelessPair({ onClose }: { onClose: () => void }) {
                 </label>
                 <button
                   className="btn primary"
-                  title="Pair this Mac with the phone"
+                 
                   disabled={busy !== null || !validHost(pairHost) || !code.trim()}
                   onClick={() => run("pair", () => androidApi.pair(pairHost.trim(), code.trim()))}
                 >
@@ -213,7 +215,7 @@ export default function WirelessPair({ onClose }: { onClose: () => void }) {
                 </label>
                 <button
                   className="btn primary"
-                  title="Connect to the paired phone"
+                 
                   disabled={busy !== null || !validHost(connectHost)}
                   onClick={() => run("connect", () => androidApi.connect(connectHost.trim()))}
                 >
@@ -229,7 +231,7 @@ export default function WirelessPair({ onClose }: { onClose: () => void }) {
 
         <footer className="setup-footer">
           <span className="grow" />
-          <button className="btn primary" title="Close this window" onClick={onClose}>
+          <button className="btn primary" onClick={onClose}>
             Done
           </button>
         </footer>

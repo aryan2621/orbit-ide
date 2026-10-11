@@ -286,24 +286,89 @@ pub struct MdnsService {
     host: String,
 }
 
-/// Wireless-debugging services adb currently sees on the local network (for QR pairing).
+/// Wireless-debugging services on the local network (for QR pairing). Asks macOS's Bonjour
+/// (`dns-sd`) as well as adb: adb's built-in discovery misses phones on some setups (e.g. a Mac on
+/// Ethernet), while Bonjour sees every interface.
 #[tauri::command]
 pub async fn android_mdns_services() -> Result<Vec<MdnsService>, String> {
     let adb_bin = adb_path().await.ok_or("adb isn't installed (Setup → Android)")?;
-    let out = adb(&adb_bin, None).args(["mdns", "services"]).output().await.map_err(|e| e.to_string())?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    Ok(text
-        .lines()
-        .filter_map(|line| {
+    let mut found = Vec::<MdnsService>::new();
+    if let Ok(out) = adb(&adb_bin, None).args(["mdns", "services"]).output().await {
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
             let mut parts = line.split_whitespace();
-            let (name, service, host) = (parts.next()?, parts.next()?, parts.next()?);
-            (service.starts_with("_adb-tls-") && host.contains(':')).then(|| MdnsService {
-                name: name.to_owned(),
-                service: service.trim_end_matches('.').to_owned(),
-                host: host.to_owned(),
-            })
-        })
-        .collect())
+            if let (Some(name), Some(service), Some(host)) = (parts.next(), parts.next(), parts.next()) {
+                if service.starts_with("_adb-tls-") && host.contains(':') {
+                    found.push(MdnsService { name: name.to_owned(), service: service.trim_end_matches('.').to_owned(), host: host.to_owned() });
+                }
+            }
+        }
+    }
+    for service in ["_adb-tls-pairing._tcp", "_adb-tls-connect._tcp"] {
+        for name in bonjour_browse(service).await {
+            if found.iter().any(|f| f.name == name && f.service == service) {
+                continue;
+            }
+            if let Some(host) = bonjour_resolve(&name, service).await {
+                found.push(MdnsService { name, service: service.to_owned(), host });
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// Runs `dns-sd` (which never exits on its own) for `ms` and returns what it printed.
+async fn dns_sd(args: &[&str], ms: u64) -> String {
+    let Ok(mut child) = tokio::process::Command::new("/usr/bin/dns-sd")
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+    else {
+        return String::new();
+    };
+    let mut stdout = child.stdout.take();
+    let mut text = Vec::new();
+    let read = async {
+        if let Some(out) = stdout.as_mut() {
+            let _ = tokio::io::AsyncReadExt::read_to_end(out, &mut text).await;
+        }
+    };
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(ms), read).await;
+    let _ = child.kill().await;
+    String::from_utf8_lossy(&text).into_owned()
+}
+
+/// Instance names currently advertising `service` (e.g. `adb-SERIAL-xyz`, or our `orbit-…` QR name).
+async fn bonjour_browse(service: &str) -> Vec<String> {
+    let text = dns_sd(&["-B", service, "local."], 1200).await;
+    let mut names: Vec<String> = Vec::new();
+    for line in text.lines() {
+        // "14:36:03.705  Add  2  14 local.  _adb-tls-connect._tcp.  adb-10BF4E156C0026E-RV55In"
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() >= 7 && cols[1] == "Add" {
+            let name = cols[6..].join(" ");
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        } else if cols.len() >= 7 && cols[1] == "Rmv" {
+            let name = cols[6..].join(" ");
+            names.retain(|n| n != &name);
+        }
+    }
+    names
+}
+
+/// `ip:port` for a Bonjour instance ("… can be reached at Android.local.:33273 …").
+async fn bonjour_resolve(name: &str, service: &str) -> Option<String> {
+    let text = dns_sd(&["-L", name, service, "local."], 1500).await;
+    let target = text.lines().find_map(|l| l.split("can be reached at ").nth(1))?.split_whitespace().next()?.to_owned();
+    let (host, port) = target.rsplit_once(':')?;
+    let port: u16 = port.parse().ok()?;
+    let host = host.trim_end_matches('.');
+    // adb wants an address; .local names resolve through mDNSResponder.
+    let addr = tokio::net::lookup_host((host, port)).await.ok()?.find(|a| a.is_ipv4())?;
+    Some(addr.to_string())
 }
 
 /// Connects to a paired phone over Wi-Fi (`host:port` from the Wireless debugging screen).

@@ -3449,3 +3449,23 @@ body.resizing-y * {
   .settings-nav-label { width: 100%; }
   .settings-page { padding: 24px 16px; }
 }
+
+/* Stacked form parts inside a section (sections aren't flex, so they need explicit spacing). */
+.settings-section > .field + .field,
+.settings-section > .field + .row-actions,
+.settings-section > .field + .check-error,
+.settings-section > .field + p,
+.settings-section > .check-error + .row-actions,
+.settings-section > .setting-row + .field,
+.settings-section > .field + .setting-row,
+.settings-section > .row-actions + .field,
+.settings-section > h2 + .field {
+  margin-top: 12px;
+}
+.settings-section > .field + .row-actions,
+.settings-section > .check-error + .row-actions {
+  margin-top: 14px;
+}
+/* An input with a button beside it: never wrap the button under the input. */
+.row.gap > .text-input { flex: 1; min-width: 0; }
+.row.gap > .btn { flex: none; }

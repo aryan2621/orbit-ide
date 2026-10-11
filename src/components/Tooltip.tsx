@@ -3,7 +3,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 const DELAY_MS = 450;
 const TARGETS = 'button, select, a[href], [role="button"], [role="tab"], .tab';
 
-/** The tooltip text for an element: an explicit title / label, else its visible text. */
+/** The tooltip for an element: its title (or, for icon-only controls, its aria-label), and only when
+ * that says more than the visible label. Plain text buttons get none. */
 function tipFor(el: HTMLElement): string {
   // Move `title` into data-tip so the browser's own (unstyled, slow) tooltip doesn't also appear.
   const title = el.getAttribute("title");
@@ -12,11 +13,14 @@ function tipFor(el: HTMLElement): string {
     el.removeAttribute("title");
     if (!el.getAttribute("aria-label") && !el.textContent?.trim()) el.setAttribute("aria-label", title);
   }
-  const text = el.dataset.tip || el.getAttribute("aria-label") || (el.tagName === "SELECT" ? "" : el.textContent?.replace(/\s+/g, " ").trim()) || "";
-  return text.length > 120 ? text.slice(0, 117) + "…" : text;
+  const visible = el.tagName === "SELECT" ? "" : (el.textContent ?? "").replace(/\s+/g, " ").trim();
+  const tip = el.dataset.tip || (!visible ? el.getAttribute("aria-label") : "") || "";
+  const same = (a: string, b: string) => a.toLowerCase().replace(/[…:.]/g, "").trim() === b.toLowerCase().replace(/[…:.]/g, "").trim();
+  if (!tip || (visible && same(tip, visible))) return "";
+  return tip.length > 160 ? tip.slice(0, 157) + "…" : tip;
 }
 
-/** One styled tooltip for every button in the app, shown on hover. Mount once at the app root. */
+/** One styled tooltip for buttons that need explaining (icons, toggles, extra detail). Mount once at the app root. */
 export function TooltipHost() {
   const [tip, setTip] = useState<{ text: string; rect: DOMRect } | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);

@@ -122,7 +122,7 @@ export default function Settings() {
                 <div className="settings-nav-group" key={g}>
                   <div className="settings-nav-label">{g}</div>
                   {items.map((p) => (
-                    <button key={p.id} className={`settings-nav-item${page === p.id ? " active" : ""}`} title={p.label} onClick={() => setSelected(p.id)}>
+                    <button key={p.id} className={`settings-nav-item${page === p.id ? " active" : ""}`} onClick={() => setSelected(p.id)}>
                       {p.icon}
                       <span>{p.label}</span>
                     </button>
@@ -146,7 +146,7 @@ export default function Settings() {
                 <Plain label="Theme" detail="Follow macOS, or always use light or dark.">
                   <div className="segmented">
                     {(["system", "light", "dark"] as ThemePref[]).map((t) => (
-                      <button key={t} className={pref === t ? "on" : ""} title={`${t[0].toUpperCase() + t.slice(1)} theme`} onClick={() => setTheme(t)}>
+                      <button key={t} className={pref === t ? "on" : ""} onClick={() => setTheme(t)}>
                         {t[0].toUpperCase() + t.slice(1)}
                       </button>
                     ))}
@@ -164,7 +164,7 @@ export default function Settings() {
               {root && (
                 <div className="settings-scope">
                   <div className="segmented">
-                    <button className={scope === "global" ? "on" : ""} title="Settings for every project" onClick={() => setScope("global")}>
+                    <button className={scope === "global" ? "on" : ""} onClick={() => setScope("global")}>
                       All projects
                     </button>
                     <button className={scope === "project" ? "on" : ""} title={`Overrides for ${projectName} only`} onClick={() => setScope("project")}>
@@ -195,7 +195,7 @@ export default function Settings() {
                 <Row label="Tab size" field="tabSize" scope={scope}>
                   <div className="segmented">
                     {[2, 4, 8].map((n) => (
-                      <button key={n} className={values.tabSize === n ? "on" : ""} title={`Indent with ${n} spaces`} onClick={() => update({ tabSize: n })}>
+                      <button key={n} className={values.tabSize === n ? "on" : ""} onClick={() => update({ tabSize: n })}>
                         {n} spaces
                       </button>
                     ))}
@@ -214,7 +214,7 @@ export default function Settings() {
                         ["onFocusChange", "On focus change"],
                       ] as [AutoSave, string][]
                     ).map(([v, l]) => (
-                      <button key={v} className={values.autoSave === v ? "on" : ""} title={`Auto save: ${l.toLowerCase()}`} onClick={() => update({ autoSave: v })}>
+                      <button key={v} className={values.autoSave === v ? "on" : ""} onClick={() => update({ autoSave: v })}>
                         {l}
                       </button>
                     ))}
