@@ -6,6 +6,7 @@ import { openAt } from "../editor/navigation";
 import { modelUri } from "../editor/monaco-setup";
 import { useWorkspace } from "../state/workspace";
 import { IconChevronDown, IconChevronRight } from "../components/Icons";
+import SearchField from "../components/SearchField";
 
 /** Expands `$1`, `${1}`, `${name}` and `$&` like the Rust side does for regex replacements. */
 function expand(replacement: string, groups: (string | undefined)[], named: Record<string, string> = {}) {
@@ -129,27 +130,36 @@ export default function SearchView({ root }: { root: string }) {
             {showReplace ? <IconChevronDown /> : <IconChevronRight />}
           </button>
           <div className="search-fields">
-            <div className="search-input">
-              <input ref={input} className="text-input" placeholder="Search in files" value={query} onChange={(e) => setQuery(e.target.value)} />
-              <button className={`toggle${matchCase ? " on" : ""}`} title="Match case" onClick={() => setMatchCase(!matchCase)}>
-                Aa
-              </button>
-              <button className={`toggle${regex ? " on" : ""}`} title="Regular expression" onClick={() => setRegex(!regex)}>
-                .*
-              </button>
-            </div>
+            <SearchField
+              ref={input}
+              className="compact"
+              placeholder="Search in files"
+              value={query}
+              onValueChange={setQuery}
+              trailing={
+                <>
+                  <button className={`search-toggle${matchCase ? " on" : ""}`} title="Match case" onClick={() => setMatchCase(!matchCase)}>
+                    Aa
+                  </button>
+                  <button className={`search-toggle${regex ? " on" : ""}`} title="Regular expression" onClick={() => setRegex(!regex)}>
+                    .*
+                  </button>
+                </>
+              }
+            />
             {showReplace && (
-              <div className="search-input">
-                <input
-                  className="text-input"
-                  placeholder={regex ? "Replace ($1 for groups)" : "Replace"}
-                  value={replacement}
-                  onChange={(e) => setReplacement(e.target.value)}
-                />
-                <button className="toggle" title="Replace All" disabled={!results?.length} onClick={replaceAll}>
-                  All
-                </button>
-              </div>
+              <SearchField
+                className="compact"
+                icon={null}
+                placeholder={regex ? "Replace ($1 for groups)" : "Replace"}
+                value={replacement}
+                onValueChange={setReplacement}
+                trailing={
+                  <button className="search-toggle" title="Replace all matches" disabled={!results?.length} onClick={replaceAll}>
+                    All
+                  </button>
+                }
+              />
             )}
           </div>
         </div>
@@ -158,8 +168,8 @@ export default function SearchView({ root }: { root: string }) {
         </button>
         {showGlobs && (
           <>
-            <input className="text-input" placeholder="Include, e.g. *.swift, app/src/**" value={include} onChange={(e) => setInclude(e.target.value)} />
-            <input className="text-input" placeholder="Exclude, e.g. *Tests*, **/generated/**" value={exclude} onChange={(e) => setExclude(e.target.value)} />
+            <SearchField className="compact" icon={null} placeholder="Include, e.g. *.swift, app/src/**" value={include} onValueChange={setInclude} />
+            <SearchField className="compact" icon={null} placeholder="Exclude, e.g. *Tests*, **/generated/**" value={exclude} onValueChange={setExclude} />
           </>
         )}
         <div className="search-summary">

@@ -1,14 +1,22 @@
-import { InputHTMLAttributes, forwardRef } from "react";
+import { InputHTMLAttributes, ReactNode, forwardRef } from "react";
 import { IconClose, IconSearch } from "./Icons";
 
 /** A search box: magnifier, the input, and a clear button once there's text. Esc clears it first. */
 const SearchField = forwardRef<
   HTMLInputElement,
-  { value: string; onValueChange: (value: string) => void; className?: string } & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">
->(function SearchField({ value, onValueChange, className, onKeyDown, ...rest }, ref) {
+  {
+    value: string;
+    onValueChange: (value: string) => void;
+    className?: string;
+    /** Leading icon; null for none (e.g. a replace or filter field). */
+    icon?: ReactNode | null;
+    /** Controls after the input, such as match-case / regex toggles. */
+    trailing?: ReactNode;
+  } & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">
+>(function SearchField({ value, onValueChange, className, icon = <IconSearch />, trailing, onKeyDown, ...rest }, ref) {
   return (
-    <div className={`search-field${className ? ` ${className}` : ""}`}>
-      <IconSearch />
+    <div className={`search-field${icon === null ? " no-icon" : ""}${className ? ` ${className}` : ""}`}>
+      {icon}
       <input
         ref={ref}
         type="text"
@@ -31,6 +39,7 @@ const SearchField = forwardRef<
           <IconClose />
         </button>
       )}
+      {trailing}
     </div>
   );
 });

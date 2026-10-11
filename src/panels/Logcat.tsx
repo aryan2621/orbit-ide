@@ -4,6 +4,7 @@ import { openAt } from "../editor/navigation";
 import { useWorkspace } from "../state/workspace";
 import { filterLines, LEVELS, LogcatLine, useLogcat } from "../state/logcat";
 import VirtualLog from "../components/VirtualLog";
+import SearchField from "../components/SearchField";
 import { aiAvailable, useAi } from "../state/ai";
 import { explainLogcatCrash } from "../ai/actions";
 
@@ -96,12 +97,7 @@ export default function Logcat() {
             </button>
           ))}
         </div>
-        <input
-          className="logcat-search"
-          placeholder="Filter by tag or text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <SearchField className="compact logcat-search" placeholder="Filter by tag or text" value={query} onValueChange={setQuery} />
         <button className="btn" onClick={() => setPaused(!paused)} title="Stop adding new lines while you read">
           {paused ? "Resume" : "Pause"}
         </button>

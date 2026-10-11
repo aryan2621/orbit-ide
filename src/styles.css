@@ -3397,3 +3397,25 @@ body.resizing-y * {
 .search-field-clear:hover { background: var(--bg-hover); color: var(--text); }
 .search-field-clear svg { width: 12px; height: 12px; }
 .l10n-search { width: 260px; height: 32px; }
+.search-field.no-icon { padding-left: 10px; }
+.search-field.compact { height: 30px; border-radius: 7px; padding-right: 3px; gap: 6px; }
+.search-field.compact > svg { width: 13px; height: 13px; }
+.search-field.compact input { font-size: 12.5px; }
+.search-toggle {
+  flex: none;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+.search-toggle:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.search-toggle.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+.search-toggle:disabled { opacity: 0.4; cursor: default; }
+.search-fields .search-field { width: 100%; }
+.logcat-search.search-field { flex: 1; min-width: 0; max-width: 320px; }
