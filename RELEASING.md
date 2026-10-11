@@ -25,7 +25,7 @@ Without this, releases still build and download fine, but installed copies can't
 npm run tauri signer generate -- -w ~/.tauri/orbit-updater.key
 ```
 
-1. Paste the public key (`~/.tauri/orbit-updater.key.pub`) into `src-tauri/tauri.conf.json` →
+1. Paste the public key (`~/.tauri/orbit-updater.key.pub`) into `src-tauri/tauri.conf.json` → (done for this repo)
    `plugins.updater.pubkey`, replacing `REPLACE_WITH_UPDATER_PUBLIC_KEY`, and commit it.
 2. In the GitHub repo → Settings → Secrets and variables → Actions, add:
    - `TAURI_SIGNING_PRIVATE_KEY`: the contents of `~/.tauri/orbit-updater.key`
