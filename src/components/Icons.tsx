@@ -282,3 +282,33 @@ export const IconMore = () => (
     <circle cx="19" cy="12" r="1" />
   </Svg>
 );
+export const IconCode = () => (
+  <Svg>
+    <path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16" />
+  </Svg>
+);
+export const IconSparkle = () => (
+  <Svg>
+    <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.7 1.8 1.8.7-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z" />
+  </Svg>
+);
+export const IconInfo = () => (
+  <Svg>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v5M12 7.5v.5" />
+  </Svg>
+);
+export const IconKeyboard = () => (
+  <Svg>
+    <rect x="2.5" y="6" width="19" height="12" rx="2" />
+    <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />
+  </Svg>
+);
+export const IconPalette = () => (
+  <Svg>
+    <path d="M12 3a9 9 0 1 0 0 18c1 0 1.6-.8 1.6-1.6 0-.5-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5c0-4.2-4-7.6-9-7.6z" />
+    <circle cx="7.5" cy="11" r="1" />
+    <circle cx="10" cy="7" r="1" />
+    <circle cx="14.5" cy="7" r="1" />
+  </Svg>
+);

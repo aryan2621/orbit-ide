@@ -22,6 +22,9 @@ interface UiState {
   showActivity: (a: Activity) => void;
   setPalette: (p: PaletteMode) => void;
   setShowSettings: (show: boolean) => void;
+  /** The Settings page to open next (general, editor, ai, keyboard, about). */
+  settingsPage: string;
+  setSettingsPage: (page: string) => void;
   setDiffPath: (path: string | null, revs?: { left: string; right: string }) => void;
   setSidebarWidth: (w: number) => void;
   setPanelHeight: (h: number) => void;
@@ -110,6 +113,8 @@ export const useUi = create<UiState>((set, get) => ({
   showActivity: (activity) => set({ activity, showSidebar: true }),
   setPalette: (palette) => set({ palette }),
   setShowSettings: (showSettings) => set({ showSettings }),
+  settingsPage: "general",
+  setSettingsPage: (settingsPage) => set({ settingsPage }),
   setDiffPath: (diffPath, diffRevs = { left: "HEAD", right: "working" }) => set({ diffPath, diffRevs }),
   setSidebarWidth: (w) => {
     const sidebarWidth = Math.round(Math.min(560, Math.max(180, w)));

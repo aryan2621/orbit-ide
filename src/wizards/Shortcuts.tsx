@@ -1,7 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
+import { useUi } from "../state/ui";
 import { getCommands } from "../palette/commands";
-import { IconClose } from "../components/Icons";
-import SearchField from "../components/SearchField";
 
 /** Monaco's own bindings worth knowing (they aren't palette commands). */
 const EDITOR: [string, string][] = [
@@ -40,9 +39,8 @@ const APP: [string, string][] = [
   ["Continue / Step Over / Into / Out", "F5 / F6 / F7 / F8"],
 ];
 
-/** "Help: Keyboard Shortcuts": every bound command, searchable. */
-export default function Shortcuts({ onClose }: { onClose: () => void }) {
-  const [query, setQuery] = useState("");
+/** Shortcut rows grouped by section, filtered by `query` (name or keys). */
+export function ShortcutList({ query }: { query: string }) {
   const sections = useMemo(() => {
     const seen = new Set(APP.map(([t]) => t));
     const commands = getCommands()
@@ -56,41 +54,34 @@ export default function Shortcuts({ onClose }: { onClose: () => void }) {
       ["Editor", match(EDITOR)],
     ] as const;
   }, [query]);
-
+  const empty = sections.every(([, rows]) => rows.length === 0);
   return (
-    <div className="overlay" role="dialog" aria-modal="true" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="setup settings">
-        <header className="setup-header">
-          <div>
-            <h1>Keyboard Shortcuts</h1>
-            <p className="muted">Everything else is in the Command Palette (⇧⌘P).</p>
-          </div>
-          <button className="icon-btn" title="Close" onClick={onClose}>
-            <IconClose />
-          </button>
-        </header>
-        <SearchField autoFocus placeholder="Search shortcuts by name or key" value={query} onValueChange={setQuery} />
-        {sections.map(
-          ([title, rows]) =>
-            rows.length > 0 && (
-              <section className="settings-section" key={title}>
-                <h2>{title}</h2>
-                {rows.map(([t, k]) => (
-                  <div className="setting-row" key={t}>
-                    <div>{t}</div>
-                    <kbd className="shortcut-keys">{k}</kbd>
-                  </div>
-                ))}
-              </section>
-            ),
-        )}
-        <footer className="setup-footer">
-          <span className="grow" />
-          <button className="btn primary" onClick={onClose}>
-            Done
-          </button>
-        </footer>
-      </div>
-    </div>
+    <>
+      {sections.map(
+        ([title, rows]) =>
+          rows.length > 0 && (
+            <section className="settings-section" key={title}>
+              <h3>{title}</h3>
+              {rows.map(([t, k]) => (
+                <div className="setting-row" key={t}>
+                  <div>{t}</div>
+                  <kbd className="shortcut-keys">{k}</kbd>
+                </div>
+              ))}
+            </section>
+          ),
+      )}
+      {empty && <p className="muted">No shortcuts match “{query}”.</p>}
+    </>
   );
+}
+
+/** "Help: Keyboard Shortcuts": opens Settings on the Keyboard page. */
+export default function Shortcuts({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    onClose();
+    useUi.getState().setSettingsPage("keyboard");
+    useUi.getState().setShowSettings(true);
+  }, [onClose]);
+  return null;
 }

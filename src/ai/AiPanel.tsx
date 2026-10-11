@@ -22,7 +22,7 @@ function ErrorRow({ error }: { error: AiError }) {
       {hint[error.code] && (
         <div className="muted small">
           {hint[error.code]}{" "}
-          <button className="link" onClick={() => useUi.getState().setShowSettings(true)}>
+          <button className="link" onClick={() => (useUi.getState().setSettingsPage("ai"), useUi.getState().setShowSettings(true))}>
             Open Settings
           </button>
         </div>
