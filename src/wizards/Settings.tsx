@@ -20,11 +20,11 @@ const PAGES: { id: Page; label: string; group: string; icon: ReactNode; keywords
 ];
 
 /** A titled group of rows, like Claude's settings sections. */
-function Section({ title, children, card = true }: { title?: string; children: ReactNode; card?: boolean }) {
+function Section({ title, children }: { title?: string; children: ReactNode }) {
   return (
     <section className="settings-section">
       {title && <h3>{title}</h3>}
-      {card ? <div className="settings-card">{children}</div> : children}
+      {children}
     </section>
   );
 }
@@ -234,7 +234,7 @@ export default function Settings() {
           {page === "ai" && (
             <>
               <h2>AI</h2>
-              <Section card={false}>
+              <Section>
                 <AiSetup />
               </Section>
             </>
@@ -270,7 +270,7 @@ export default function Settings() {
                   </button>
                 </Plain>
               </Section>
-              <Section title="Privacy" card={false}>
+              <Section title="Privacy">
                 <p className="muted settings-note">
                   Orbit has no telemetry or accounts. The AI runs on this Mac; your code and chats never leave it. Orbit connects to the internet only to check for updates, download
                   models and toolchains you choose, and upload builds to Apple or Google.

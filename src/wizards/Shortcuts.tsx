@@ -62,14 +62,12 @@ export function ShortcutList({ query }: { query: string }) {
           rows.length > 0 && (
             <section className="settings-section" key={title}>
               <h3>{title}</h3>
-              <div className="settings-card">
-                {rows.map(([t, k]) => (
-                  <div className="setting-row" key={t}>
-                    <div>{t}</div>
-                    <kbd className="shortcut-keys">{k}</kbd>
-                  </div>
-                ))}
-              </div>
+              {rows.map(([t, k]) => (
+                <div className="setting-row" key={t}>
+                  <div>{t}</div>
+                  <kbd className="shortcut-keys">{k}</kbd>
+                </div>
+              ))}
             </section>
           ),
       )}
