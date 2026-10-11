@@ -3678,3 +3678,7 @@ textarea.text-input { height: auto; padding: 8px 10px; line-height: 1.5; resize:
 .panel-tab { white-space: nowrap; flex: none; }
 .panel-tabs { display: flex; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .panel-tabs::-webkit-scrollbar { display: none; }
+
+/* The editor takes the space left under the tab strip and breadcrumbs (its own height is 100% of this). */
+.editor-host { flex: 1; min-height: 0; position: relative; }
+.editor-group { overflow: hidden; }

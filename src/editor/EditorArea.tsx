@@ -150,6 +150,7 @@ function EditorGroupView({ index, theme }: { index: number; theme: "light" | "da
         </div>
       )}
       {active ? (
+        <div className="editor-host">
         <Editor
           // `path` gives each file its own Monaco model, preserving undo history and cursor per tab.
           path={modelUri(active.path).toString()}
@@ -178,6 +179,7 @@ function EditorGroupView({ index, theme }: { index: number; theme: "light" | "da
             guides: { bracketPairs: "active" },
           }}
         />
+        </div>
       ) : (
         <div className="empty-editor">
           <h1>{root?.split("/").pop()}</h1>
