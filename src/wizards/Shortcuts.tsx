@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { getCommands } from "../palette/commands";
 import { IconClose } from "../components/Icons";
+import SearchField from "../components/SearchField";
 
 /** Monaco's own bindings worth knowing (they aren't palette commands). */
 const EDITOR: [string, string][] = [
@@ -68,7 +69,7 @@ export default function Shortcuts({ onClose }: { onClose: () => void }) {
             <IconClose />
           </button>
         </header>
-        <input className="text-input" autoFocus placeholder="Search shortcuts" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <SearchField autoFocus placeholder="Search shortcuts by name or key" value={query} onValueChange={setQuery} />
         {sections.map(
           ([title, rows]) =>
             rows.length > 0 && (

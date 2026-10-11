@@ -328,6 +328,7 @@ export const androidApi = {
   ) => invoke<void>("android_archive", { root, scheme, configuration: variant, format, upload, jobId }),
   pair: (host: string, code: string) => invoke<string>("android_pair", { host, code }),
   connect: (host: string) => invoke<string>("android_connect", { host }),
+  mdnsServices: () => invoke<{ name: string; service: string; host: string }[]>("android_mdns_services"),
   stopEmulator: (serial: string) => invoke<void>("android_emulator_stop", { serial }),
 };
 

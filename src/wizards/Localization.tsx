@@ -4,6 +4,7 @@ import { Catalog, Table, findCatalogs, languageName, loadTable, saveCell } from 
 import { ensureFileModel, isDirty, markSaved, useWorkspace } from "../state/workspace";
 import { promptText } from "../components/Prompt";
 import { IconClose } from "../components/Icons";
+import SearchField from "../components/SearchField";
 
 /** One editable translation; saves on blur or ⌘↩ / ↩ (⇧↩ for a new line). */
 function Cell({ value, missing, review, readOnly, onSave }: { value: string | undefined; missing: boolean; review: boolean; readOnly?: string; onSave: (v: string) => void }) {
@@ -148,7 +149,7 @@ export default function Localization({ root, onClose }: { root: string; onClose:
         ) : (
           <>
             <div className="l10n-toolbar">
-              <input className="text-input" placeholder="Filter keys and text" value={query} onChange={(e) => setQuery(e.target.value)} />
+              <SearchField className="l10n-search" placeholder="Filter keys and text" value={query} onValueChange={setQuery} />
               <label className="check">
                 <input type="checkbox" checked={onlyMissing} onChange={(e) => setOnlyMissing(e.target.checked)} /> Only missing or needing review
               </label>

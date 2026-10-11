@@ -50,6 +50,7 @@ import StatusBar from "./StatusBar";
 import Resizer from "../components/Resizer";
 import { ContextMenuHost } from "../components/ContextMenu";
 import { PromptHost } from "../components/Prompt";
+import { TooltipHost } from "../components/Tooltip";
 import { IconClose, IconCommand, IconPanelBottom } from "../components/Icons";
 
 const isMac = navigator.userAgent.includes("Mac");
@@ -311,6 +312,7 @@ export default function Layout() {
       <ContextMenuHost />
       <Toasts />
       <PromptHost />
+      <TooltipHost />
     </div>
   );
 }

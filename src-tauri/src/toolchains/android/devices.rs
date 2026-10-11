@@ -277,6 +277,35 @@ pub async fn android_pair(host: String, code: String) -> Result<String, String> 
     }
 }
 
+/// One service from `adb mdns services`: phones advertise `_adb-tls-pairing._tcp` while showing a
+/// pairing QR code / code, and `_adb-tls-connect._tcp` once Wireless debugging is on.
+#[derive(serde::Serialize)]
+pub struct MdnsService {
+    name: String,
+    service: String,
+    host: String,
+}
+
+/// Wireless-debugging services adb currently sees on the local network (for QR pairing).
+#[tauri::command]
+pub async fn android_mdns_services() -> Result<Vec<MdnsService>, String> {
+    let adb_bin = adb_path().await.ok_or("adb isn't installed (Setup → Android)")?;
+    let out = adb(&adb_bin, None).args(["mdns", "services"]).output().await.map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    Ok(text
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let (name, service, host) = (parts.next()?, parts.next()?, parts.next()?);
+            (service.starts_with("_adb-tls-") && host.contains(':')).then(|| MdnsService {
+                name: name.to_owned(),
+                service: service.trim_end_matches('.').to_owned(),
+                host: host.to_owned(),
+            })
+        })
+        .collect())
+}
+
 /// Connects to a paired phone over Wi-Fi (`host:port` from the Wireless debugging screen).
 #[tauri::command]
 pub async fn android_connect(host: String) -> Result<String, String> {
