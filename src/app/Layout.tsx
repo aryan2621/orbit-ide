@@ -176,6 +176,44 @@ export default function Layout() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Esc closes the topmost dialog by pressing its close button, unless something inside it (a text
+  // prompt, menu, palette or search box) already used the key.
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || document.querySelector(".menu-backdrop")) return;
+      const overlays = document.querySelectorAll<HTMLElement>(".overlay");
+      const top = overlays[overlays.length - 1];
+      if (!top) return;
+      const close = [...top.querySelectorAll<HTMLButtonElement>("button")].find((b) => /^close/i.test(b.dataset.tip ?? b.title ?? b.getAttribute("aria-label") ?? ""));
+      if (close) {
+        e.preventDefault();
+        close.click();
+      }
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, []);
+
+  // A newly opened form dialog puts the cursor in its first empty field.
+  useEffect(() => {
+    const seen = new WeakSet<Element>();
+    const observer = new MutationObserver(() => {
+      document.querySelectorAll<HTMLElement>(".overlay > .setup").forEach((dialog) => {
+        if (seen.has(dialog)) return;
+        seen.add(dialog);
+        requestAnimationFrame(() => {
+          if (dialog.contains(document.activeElement)) return;
+          const field = dialog.querySelector<HTMLInputElement>("input.text-input:not([readonly]):not(:disabled), textarea.text-input:not(:disabled)");
+          if (field && !field.value) field.focus();
+        });
+      });
+    });
+    // Dialogs mount as direct children of the app root, so there's no need to watch the editor's DOM.
+    const app = document.querySelector(".app");
+    if (app) observer.observe(app, { childList: true });
+    return () => observer.disconnect();
+  }, []);
+
   const sidebarView = root
     ? {
         explorer: <Explorer root={root} />,

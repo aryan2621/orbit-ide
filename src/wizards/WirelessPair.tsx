@@ -128,12 +128,6 @@ export default function WirelessPair({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const run = async (kind: "pair" | "connect", action: () => Promise<string>) => {
     setBusy(kind);
     setError(null);

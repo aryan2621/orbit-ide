@@ -3506,3 +3506,169 @@ body.resizing-y * {
 .device-create h3 { margin: 0; font-size: 13px; }
 .device-create .row-actions { margin-top: 2px; }
 .skeleton-block { min-height: 160px; background: linear-gradient(90deg, var(--bg-sunken), var(--bg-hover), var(--bg-sunken)); background-size: 200% 100%; animation: skeleton-shimmer 1.2s infinite; border: 0; }
+
+/* ================================================================ dialog system (all .setup dialogs) */
+
+/* Shell: pinned header, scrolling content, pinned footer. */
+.setup {
+  padding: 0;
+  gap: 18px;
+  border-radius: 16px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.setup > :not(.setup-header):not(.setup-footer) { margin-inline: 24px; flex-shrink: 0; }
+.setup > .setup-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: 18px 18px 14px 24px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+.setup-header h1 { font-size: 21px; margin: 0; line-height: 1.25; }
+.setup-header p { margin-top: 3px; font-size: 12.5px; line-height: 1.45; }
+.setup-header .icon-btn { flex: none; align-self: flex-start; }
+.setup > .setup-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  margin-top: auto;
+  padding: 12px 18px 12px 24px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+/* Some space under the content when there's no footer. */
+.setup > :last-child:not(.setup-footer) { margin-bottom: 24px; }
+
+/* Section headings inside dialogs. */
+.setup .settings-section > h2,
+.setup fieldset > legend {
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Fields */
+.setup .field { gap: 6px; }
+.setup .field > span { font-size: 12.5px; font-weight: 500; color: var(--text); }
+.setup .field > small { font-size: 12px; line-height: 1.4; }
+.setup .field-error { font-size: 12px; }
+.text-input,
+.setup select:not(.picker) {
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.setup select:not(.picker) { padding: 0 30px 0 10px; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%); background-position: calc(100% - 15px) 15px, calc(100% - 10px) 15px; background-size: 5px 5px; background-repeat: no-repeat; cursor: pointer; }
+.text-input:hover:not(:disabled):not(:focus),
+.setup select:not(.picker):hover:not(:disabled) { border-color: var(--border-strong); }
+.text-input:focus,
+.setup select:not(.picker):focus { border-color: var(--focus); box-shadow: 0 0 0 3px var(--accent-soft); background: var(--bg-elev); outline: none; }
+.text-input:disabled,
+.setup select:not(.picker):disabled { opacity: 0.6; cursor: not-allowed; }
+textarea.text-input { height: auto; padding: 8px 10px; line-height: 1.5; resize: vertical; }
+.text-input[readonly] { background: var(--bg-sunken); }
+
+/* Option cards (radio groups) */
+.setup .choice-group { display: flex; flex-direction: column; gap: 8px; }
+.setup .choice-group > legend { margin-bottom: 8px; }
+.setup .choice {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--bg);
+  transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
+}
+.setup .choice:hover { border-color: var(--border-strong); }
+.setup .choice:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.setup .choice:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
+.setup .choice strong, .setup .choice b { font-weight: 600; }
+.setup .choice small, .setup .choice .muted { display: block; margin-top: 2px; font-size: 12px; line-height: 1.4; }
+
+/* Buttons */
+.btn { height: 32px; border-radius: 8px; font-size: 13px; transition: background 0.12s, border-color 0.12s, filter 0.12s, box-shadow 0.12s; }
+.btn.primary { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--focus); }
+.setup-footer .btn { min-width: 76px; }
+
+/* Errors as alerts */
+.setup .check-error,
+.devices-body .check-error {
+  margin: 0;
+  padding: 10px 12px 10px 34px;
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.45;
+  position: relative;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.setup .check-error::before,
+.devices-body .check-error::before {
+  content: "!";
+  position: absolute;
+  left: 11px;
+  top: 10px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: var(--bg-elev);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+.setup .field .check-error { padding-block: 6px; }
+.setup .field .check-error::before { top: 6px; }
+
+/* Rows of settings inside dialogs */
+.setup .setting-row { padding: 11px 0; }
+.setup .settings-section > .setting-row:first-of-type { padding-top: 4px; }
+
+/* Small text prompts (rename, new file, AI instruction…) */
+.prompt { border-radius: 14px; padding: 18px 20px; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.08); }
+
+/* Slightly narrower dialogs */
+.setup { width: min(600px, 100%); }
+.setup.settings { width: min(520px, 100%); }
+.setup.setup-wide { width: min(940px, 100%); }
+.pair-window.setup { width: min(560px, 100%); }
+.devices-window { width: min(620px, 100%); }
+.settings-window { width: min(920px, 100%); height: min(660px, 100%); }
+.l10n-window { width: min(1180px, 100%); }
+.diff-window { width: min(1100px, 100%); }
+.prompt { width: min(420px, calc(100vw - 32px)); }
+.prompt .field > span { font-size: 14px; font-weight: 600; }
+.prompt .text-input { height: 36px; }
+.setup.setup-wide > .setup-body { flex-shrink: 1; margin-bottom: 0; }
+.setup .choice > div > div:first-child { font-weight: 500; }
+.setup .choice input[type="radio"], .setup .choice input[type="checkbox"] { width: 15px; height: 15px; margin-top: 2px; flex: none; }
+.setup fieldset.field > span { margin-bottom: 2px; }
+.setup .notice {
+  margin: 0;
+  padding: 10px 12px 10px 34px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  position: relative;
+  border: 0;
+}
+.setup .notice::before { position: absolute; left: 11px; top: 10px; width: 15px; height: 15px; border-radius: 50%; font-size: 11px; font-weight: 700; line-height: 15px; text-align: center; color: var(--bg-elev); }
+.setup .notice.warning { background: var(--warning-soft); color: var(--text); }
+.setup .notice.warning::before { content: "!"; background: var(--warning); }
+.setup .notice.info, .setup .notice:not(.warning):not(.error) { background: var(--accent-soft); color: var(--text); }
+.setup .notice.info::before, .setup .notice:not(.warning):not(.error)::before { content: "i"; background: var(--accent); font-style: italic; font-family: var(--serif); }
+.setup .notice.error { background: var(--danger-soft); color: var(--danger); }
+.setup .notice.error::before { content: "!"; background: var(--danger); }
+.setup .setup-hint { font-size: 12px; color: var(--text-muted); }

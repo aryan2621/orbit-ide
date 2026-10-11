@@ -98,9 +98,6 @@ export default function Settings() {
 
   useEffect(() => {
     appInfo().then((i) => setVersion(i.version), () => {});
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

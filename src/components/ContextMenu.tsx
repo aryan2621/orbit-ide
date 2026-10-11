@@ -36,7 +36,7 @@ export function ContextMenuHost() {
 
   useEffect(() => {
     if (!menu) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && (e.preventDefault(), close());
     window.addEventListener("keydown", onKey);
     window.addEventListener("blur", close);
     return () => {

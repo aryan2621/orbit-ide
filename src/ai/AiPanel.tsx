@@ -127,6 +127,7 @@ export default function AiPanel() {
       e.preventDefault();
       submit();
     } else if (e.key === "Escape" && running) {
+      e.preventDefault();
       stop();
     }
   };

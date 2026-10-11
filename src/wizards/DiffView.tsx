@@ -25,12 +25,6 @@ export default function DiffView({ theme }: { theme: "light" | "dark" }) {
     Promise.all([read(diffRevs.left), read(diffRevs.right)]).then(([before, after]) => setTexts({ before, after }));
   }, [diffPath, diffRevs, repo]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDiffPath(null);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [setDiffPath]);
-
   if (!diffPath || !repo) return null;
   return (
     <div className="overlay" role="dialog" aria-modal="true" onMouseDown={(e) => e.target === e.currentTarget && setDiffPath(null)}>

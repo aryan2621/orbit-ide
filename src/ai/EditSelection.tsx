@@ -1,6 +1,6 @@
 // "Edit selection with AI…" (⌘K): ask for an instruction, rewrite the selection with one completion,
 // then review it in a diff before applying (as one undoable edit).
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { create } from "zustand";
 import * as monaco from "monaco-editor";
 import { DiffEditor } from "@monaco-editor/react";
@@ -105,13 +105,6 @@ function accept(edit: Edit, text: string) {
 export function EditSelectionHost({ theme }: { theme: "light" | "dark" }) {
   const edit = useEdit((s) => s.edit);
   const diff = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
-
-  useEffect(() => {
-    if (!edit) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [edit]);
 
   if (!edit) return null;
   const name = edit.path.split("/").pop();

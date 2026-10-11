@@ -31,11 +31,8 @@ export default function DeviceManager({ onClose }: { onClose: () => void }) {
     loadDevices();
     // Emulators boot in the background; keep the list fresh while the dialog is open.
     const timer = setInterval(() => loadDevices(), 4000);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
     return () => {
       clearInterval(timer);
-      window.removeEventListener("keydown", onKey);
     };
   }, [loadDevices, onClose]);
 

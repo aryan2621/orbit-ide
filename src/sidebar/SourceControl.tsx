@@ -106,7 +106,7 @@ function BranchPicker({ repo, current }: { repo: string; current: string | null 
         placeholder="New branch name ↩"
         value={name}
         onChange={(e) => setName(e.target.value.replace(/\s+/g, "-"))}
-        onKeyDown={(e) => (e.key === "Enter" ? finish(true) : e.key === "Escape" && finish(false))}
+        onKeyDown={(e) => (e.key === "Enter" ? finish(true) : e.key === "Escape" && (e.preventDefault(), finish(false)))}
         onBlur={() => finish(false)}
       />
     );

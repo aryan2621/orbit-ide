@@ -48,7 +48,7 @@ export function PromptHost() {
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") finish(value);
-              else if (e.key === "Escape") finish(null);
+              else if (e.key === "Escape") (e.preventDefault(), finish(null));
             }}
           />
           {request.detail && <small className="muted">{request.detail}</small>}

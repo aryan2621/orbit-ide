@@ -61,7 +61,7 @@ function InlineInput({
   };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") finish(value.trim() || null);
-    else if (e.key === "Escape") finish(null);
+    else if (e.key === "Escape") (e.preventDefault(), finish(null));
   };
   return (
     <div className="tree-row editing" style={{ paddingLeft: 4 + depth * 12 }}>

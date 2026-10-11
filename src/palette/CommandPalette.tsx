@@ -161,6 +161,7 @@ export default function CommandPalette() {
       close();
       rows[index].run();
     } else if (e.key === "Escape") {
+      e.preventDefault();
       close();
     }
   };

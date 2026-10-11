@@ -32,7 +32,7 @@ function Cell({ value, missing, review, readOnly, onSave }: { value: string | un
             (e.target as HTMLTextAreaElement).blur();
           } else if (e.key === "Escape") {
             setDraft(value ?? "");
-            e.stopPropagation();
+            e.preventDefault();
           }
         }}
       />
@@ -67,12 +67,6 @@ export default function Localization({ root, onClose }: { root: string; onClose:
       .then(setTable)
       .catch((e) => setError(`Couldn't read ${catalog.label}: ${e}`));
   }, [catalog, extra]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const isMissing = (t: Table, r: Table["rows"][number], l: string) => l !== t.source && !r.skip && !r.readOnly[l] && !r.values[l];
 
